@@ -1,0 +1,7 @@
+-- 000001_initial_schema.down.sql
+
+DROP TABLE IF EXISTS refresh_sessions CASCADE;
+DROP TABLE IF EXISTS invitations CASCADE;
+DROP TABLE IF EXISTS user_roles CASCADE;
+DROP TABLE IF EXISTS roles CASCADE;
+DROP TABLE IF EXISTS users CASCADE;

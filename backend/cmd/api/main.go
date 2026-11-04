@@ -1,0 +1,153 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
+
+	"go-academy/backend/internal/config"
+	"go-academy/backend/internal/database"
+	"go-academy/backend/internal/health"
+	appmiddleware "go-academy/backend/internal/middleware"
+	"go-academy/backend/internal/platform/response"
+)
+
+func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to load configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Configure structured logger
+	var logHandler slog.Handler
+	logLevel := slog.LevelInfo
+	if cfg.LogLevel == "debug" {
+		logLevel = slog.LevelDebug
+	}
+
+	if cfg.IsProduction() {
+		logHandler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})
+	} else {
+		logHandler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})
+	}
+	logger := slog.New(logHandler)
+	slog.SetDefault(logger)
+
+	logger.Info("starting application",
+		slog.String("app_name", cfg.AppName),
+		slog.String("environment", cfg.AppEnv),
+		slog.String("port", cfg.Port),
+	)
+
+	// Apply database migrations
+	if err := database.RunMigrations(cfg.DatabaseURL, "migrations", logger); err != nil {
+		logger.Warn("migration runner notice", slog.String("detail", err.Error()))
+	}
+
+	// Initialize database connection pool
+	ctxInit, cancelInit := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelInit()
+
+	pool, err := database.NewPool(ctxInit, cfg)
+	if err != nil {
+		logger.Error("failed to connect to database", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	db := database.NewDB(pool)
+	defer db.Close()
+
+	logger.Info("database connection pool established",
+		slog.Int("max_conns", cfg.DBMaxOpenConns),
+		slog.Int("min_conns", cfg.DBMaxIdleConns),
+	)
+
+	// Router setup
+	r := chi.NewRouter()
+
+	// Base middlewares
+	r.Use(chimiddleware.RealIP)
+	r.Use(chimiddleware.RequestID)
+	r.Use(appmiddleware.RequestLogger(logger))
+	r.Use(appmiddleware.Recoverer(logger))
+
+	// CORS middleware
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   []string{cfg.FrontendURL},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Request-ID"},
+		ExposedHeaders:   []string{"Link", "X-Request-ID"},
+		AllowCredentials: true,
+		MaxAge:           300,
+	}))
+
+	// Enforce 1MB max request body limit
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB
+			next.ServeHTTP(w, r)
+		})
+	})
+
+	// Health routes with live database ping check
+	healthHandler := health.NewHandler(db)
+	r.Get("/health/live", healthHandler.Live)
+	r.Get("/health/ready", healthHandler.Ready)
+
+	// API v1 routes
+	r.Route("/api/v1", func(r chi.Router) {
+		r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
+			response.JSON(w, http.StatusOK, map[string]string{
+				"message": "Go Academy API v1 operational",
+			}, nil)
+		})
+	})
+
+	// Server configuration
+	server := &http.Server{
+		Addr:         ":" + cfg.Port,
+		Handler:      r,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	// Server shutdown channel
+	shutdownError := make(chan error)
+
+	go func() {
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+		s := <-quit
+
+		logger.Info("shutting down server", slog.String("signal", s.String()))
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		shutdownError <- server.Shutdown(ctx)
+	}()
+
+	logger.Info("server listening", slog.String("addr", server.Addr))
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Error("server failed to start", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	if err := <-shutdownError; err != nil {
+		logger.Error("graceful shutdown failed", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+
+	logger.Info("server stopped cleanly")
+}

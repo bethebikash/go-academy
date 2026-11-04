@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: goacademy-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-goacademy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-goacademy_password}
+      POSTGRES_DB: ${POSTGRES_DB:-goacademy_dev}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-goacademy} -d ${POSTGRES_DB:-goacademy_dev}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: goacademy-backend
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      APP_PORT: 8080
+      LOG_LEVEL: info
+      FRONTEND_URL: http://localhost:3000
+      DATABASE_URL: postgres://${POSTGRES_USER:-goacademy}:${POSTGRES_PASSWORD:-goacademy_password}@postgres:5432/${POSTGRES_DB:-goacademy_dev}?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:-production_secure_jwt_secret_with_minimum_32_characters!}
+      COOKIE_SECURE: "true"
+      COOKIE_DOMAIN: localhost
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: goacademy-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+    driver: local
