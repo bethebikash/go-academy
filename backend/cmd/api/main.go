@@ -14,12 +14,15 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"golang.org/x/time/rate"
 
+	"go-academy/backend/internal/auth"
 	"go-academy/backend/internal/config"
 	"go-academy/backend/internal/database"
 	"go-academy/backend/internal/health"
 	appmiddleware "go-academy/backend/internal/middleware"
 	"go-academy/backend/internal/platform/response"
+	"go-academy/backend/internal/users"
 )
 
 func main() {
@@ -72,6 +75,17 @@ func main() {
 		slog.Int("min_conns", cfg.DBMaxIdleConns),
 	)
 
+	// Domain Services
+	userService := users.NewService(db)
+	authService := auth.NewService(db, cfg, userService)
+
+	// HTTP Handlers
+	healthHandler := health.NewHandler(db)
+	authHandler := auth.NewHandler(authService, userService, cfg)
+
+	// Rate Limiter for Login (e.g. 5 requests / min with burst capacity)
+	loginLimiter := appmiddleware.NewIPRateLimiter(rate.Every(time.Minute/time.Duration(cfg.RateLimitLogin)), cfg.RateLimitLogin)
+
 	// Router setup
 	r := chi.NewRouter()
 
@@ -99,8 +113,10 @@ func main() {
 		})
 	})
 
+	// Global JWT parsing middleware
+	r.Use(appmiddleware.Authenticate(cfg.JWTSecret))
+
 	// Health routes with live database ping check
-	healthHandler := health.NewHandler(db)
 	r.Get("/health/live", healthHandler.Live)
 	r.Get("/health/ready", healthHandler.Ready)
 
@@ -110,6 +126,26 @@ func main() {
 			response.JSON(w, http.StatusOK, map[string]string{
 				"message": "Go Academy API v1 operational",
 			}, nil)
+		})
+
+		// Authentication routes
+		r.Route("/auth", func(r chi.Router) {
+			r.With(loginLimiter.Limit).Post("/login", authHandler.Login)
+			r.Post("/refresh", authHandler.Refresh)
+			r.Post("/logout", authHandler.Logout)
+			r.With(appmiddleware.RequireAuth).Get("/me", authHandler.Me)
+		})
+
+		// Admin routes (Protected by authentication + admin role)
+		r.Route("/admin", func(r chi.Router) {
+			r.Use(appmiddleware.RequireAuth)
+			r.Use(appmiddleware.RequireRole(users.RoleAdmin))
+
+			r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
+				response.JSON(w, http.StatusOK, map[string]string{
+					"message": "Admin authorization verified",
+				}, nil)
+			})
 		})
 	})
 
