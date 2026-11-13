@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"go-academy/backend/internal/auth"
 	"go-academy/backend/internal/platform/response"
 )
 
@@ -19,6 +20,18 @@ type Handler struct {
 // NewHandler constructs a new challenges Handler.
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
+}
+
+func getUserID(r *http.Request) (*uuid.UUID, error) {
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok {
+		return nil, errors.New("unauthorized")
+	}
+	id, err := uuid.Parse(claims.UserID)
+	if err != nil {
+		return nil, errors.New("invalid user id in claims")
+	}
+	return &id, nil
 }
 
 // --- Learner Endpoints ---
@@ -54,6 +67,125 @@ func (h *Handler) GetChallenge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.JSON(w, http.StatusOK, challenge, nil)
+}
+
+// RunSampleTests handles POST /api/v1/challenges/{slug}/run.
+func (h *Handler) RunSampleTests(w http.ResponseWriter, r *http.Request) {
+	slug := chi.URLParam(r, "slug")
+	if slug == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "Challenge slug is required", nil)
+		return
+	}
+
+	var req RunCodeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_JSON", "Malformed request body", nil)
+		return
+	}
+
+	result, err := h.service.RunSampleTests(r.Context(), slug, req.Code)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			response.Error(w, http.StatusNotFound, "NOT_FOUND", "Challenge not found", nil)
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to run sample tests", nil)
+		return
+	}
+
+	response.JSON(w, http.StatusOK, result, nil)
+}
+
+// SubmitChallenge handles POST /api/v1/challenges/{slug}/submit.
+func (h *Handler) SubmitChallenge(w http.ResponseWriter, r *http.Request) {
+	userID, err := getUserID(r)
+	if err != nil {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+		return
+	}
+
+	slug := chi.URLParam(r, "slug")
+	if slug == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "Challenge slug is required", nil)
+		return
+	}
+
+	var req RunCodeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_JSON", "Malformed request body", nil)
+		return
+	}
+
+	sub, err := h.service.SubmitChallenge(r.Context(), *userID, slug, req.Code)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			response.Error(w, http.StatusNotFound, "NOT_FOUND", "Challenge not found", nil)
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to submit challenge", nil)
+		return
+	}
+
+	response.JSON(w, http.StatusCreated, sub, nil)
+}
+
+// ListSubmissions handles GET /api/v1/challenges/{slug}/submissions.
+func (h *Handler) ListSubmissions(w http.ResponseWriter, r *http.Request) {
+	userID, err := getUserID(r)
+	if err != nil {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+		return
+	}
+
+	slug := chi.URLParam(r, "slug")
+	if slug == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "Challenge slug is required", nil)
+		return
+	}
+
+	submissions, err := h.service.ListSubmissions(r.Context(), *userID, slug)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			response.Error(w, http.StatusNotFound, "NOT_FOUND", "Challenge not found", nil)
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to list submissions", nil)
+		return
+	}
+
+	response.JSON(w, http.StatusOK, submissions, nil)
+}
+
+// GetSubmission handles GET /api/v1/challenges/{slug}/submissions/{id}.
+func (h *Handler) GetSubmission(w http.ResponseWriter, r *http.Request) {
+	userID, err := getUserID(r)
+	if err != nil {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil)
+		return
+	}
+
+	idStr := chi.URLParam(r, "id")
+	subID, err := uuid.Parse(idStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid submission ID", nil)
+		return
+	}
+
+	sub, err := h.service.GetSubmission(r.Context(), *userID, subID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			response.Error(w, http.StatusNotFound, "NOT_FOUND", "Submission not found", nil)
+			return
+		}
+		if errors.Is(err, ErrUnauthorized) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Not authorized to view this submission", nil)
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get submission", nil)
+		return
+	}
+
+	response.JSON(w, http.StatusOK, sub, nil)
 }
 
 // --- Admin Endpoints ---

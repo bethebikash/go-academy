@@ -283,3 +283,43 @@ export interface UpdateChallengePayload {
   sort_order: number
   test_cases: CreateTestCasePayload[]
 }
+
+// Submission & Runner Types
+
+export interface TestCaseOutcome {
+  test_case_id: string
+  title: string
+  passed: boolean
+  hidden: boolean
+  input?: string
+  expected_output?: string
+  actual_output?: string
+  execution_time_ms: number
+  error_message?: string
+}
+
+export interface ExecutionResult {
+  status: 'passed' | 'failed' | 'compile_error' | 'timed_out' | 'error'
+  total_tests: number
+  passed_tests: number
+  execution_time_ms: number
+  compiler_output?: string
+  test_outcomes: TestCaseOutcome[]
+}
+
+export interface SubmissionSummary {
+  id: string
+  challenge_id: string
+  user_id: string
+  status: string
+  total_test_cases: number
+  passed_test_cases: number
+  execution_time_ms: number
+  created_at: string
+}
+
+export interface SubmissionDetail extends SubmissionSummary {
+  code: string
+  error_output?: string
+  test_outcomes: TestCaseOutcome[]
+}

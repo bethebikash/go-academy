@@ -10,6 +10,10 @@ import (
 	"go-academy/backend/internal/challenges"
 	"go-academy/backend/internal/config"
 	"go-academy/backend/internal/database"
+	"go-academy/backend/internal/database/sqlc"
+	"go-academy/backend/internal/runner"
+
+	"github.com/google/uuid"
 )
 
 func setupTestDB(t *testing.T) (*database.DB, func()) {
@@ -45,7 +49,8 @@ func TestChallengeLifecycleAndSecurityBoundary(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	svc := challenges.NewService(db)
+	codeRunner := runner.NewProcessRunner(5 * time.Second)
+	svc := challenges.NewService(db, codeRunner)
 
 	suffix := time.Now().UnixNano()
 	challengeTitle := fmt.Sprintf("Challenge Security Test %d", suffix)
@@ -179,5 +184,140 @@ func TestChallengeLifecycleAndSecurityBoundary(t *testing.T) {
 	_, err = svc.GetChallengeByID(ctx, created.ID)
 	if !errors.Is(err, challenges.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound after deletion, got: %v", err)
+	}
+}
+
+func TestChallengeSubmissionsAndExecutionFlow(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	if db == nil {
+		return
+	}
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	codeRunner := runner.NewProcessRunner(5 * time.Second)
+	svc := challenges.NewService(db, codeRunner)
+
+	// Create test user
+	suffix := time.Now().UnixNano()
+	userRow, err := db.Queries.CreateUser(ctx, sqlc.CreateUserParams{
+		Email:        fmt.Sprintf("sub_user_%d@example.com", suffix),
+		Username:     fmt.Sprintf("sub_usr_%d", suffix),
+		PasswordHash: "fakehash",
+		Status:       "active",
+		Timezone:     "UTC",
+	})
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+	userID := uuid.UUID(userRow.ID.Bytes)
+
+	// Admin creates TwoSum challenge
+	slug := fmt.Sprintf("two-sum-test-%d", suffix)
+	created, err := svc.CreateChallenge(ctx, challenges.CreateChallengeRequest{
+		Title:            "Two Sum Test",
+		Slug:             slug,
+		Description:      "Find two numbers",
+		Difficulty:       challenges.DifficultyBeginner,
+		EstimatedMinutes: 15,
+		StarterCode:      "package main",
+		Status:           challenges.StatusPublished,
+		TestCases: []challenges.CreateTestCaseRequest{
+			{
+				Title:          "Sample 1",
+				Input:          "sample in",
+				ExpectedOutput: "[0, 1]",
+				Hidden:         false,
+				SortOrder:      1,
+			},
+			{
+				Title:          "Secret 1",
+				Input:          "secret in",
+				ExpectedOutput: "[2, 4]",
+				Hidden:         true,
+				SortOrder:      2,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create challenge: %v", err)
+	}
+	_ = created
+
+	// 1. Run Sample Tests (Passing code)
+	validCode := `package main
+
+func TwoSum(nums []int, target int) []int {
+	seen := make(map[int]int, len(nums))
+	for i, num := range nums {
+		diff := target - num
+		if j, ok := seen[diff]; ok {
+			return []int{j, i}
+		}
+		seen[num] = i
+	}
+	return nil
+}
+`
+	runRes, err := svc.RunSampleTests(ctx, slug, validCode)
+	if err != nil {
+		t.Fatalf("failed to run sample tests: %v", err)
+	}
+	if runRes.Status != runner.StatusPassed {
+		t.Fatalf("expected passed status for sample tests, got: %s", runRes.Status)
+	}
+
+	// 2. Submit solution
+	subDetail, err := svc.SubmitChallenge(ctx, userID, slug, validCode)
+	if err != nil {
+		t.Fatalf("failed to submit challenge: %v", err)
+	}
+	if subDetail.Status != runner.StatusPassed {
+		t.Fatalf("expected submission to pass all tests, got: %s", subDetail.Status)
+	}
+	if subDetail.TotalTestCases < 1 {
+		t.Errorf("expected at least 1 test case evaluated, got %d", subDetail.TotalTestCases)
+	}
+
+	// Verify hidden test sanitization
+	for _, o := range subDetail.TestOutcomes {
+		if o.Hidden {
+			if o.Input != "[Hidden test case]" {
+				t.Errorf("expected hidden test input to be sanitized, got %q", o.Input)
+			}
+			if o.ExpectedOutput != "[Hidden test case]" {
+				t.Errorf("expected hidden test expected output to be sanitized, got %q", o.ExpectedOutput)
+			}
+		}
+	}
+
+	// 3. List submissions
+	subs, err := svc.ListSubmissions(ctx, userID, slug)
+	if err != nil {
+		t.Fatalf("failed to list submissions: %v", err)
+	}
+	if len(subs) != 1 {
+		t.Fatalf("expected 1 submission in history, got %d", len(subs))
+	}
+	if subs[0].ID != subDetail.ID {
+		t.Errorf("expected submission ID %s, got %s", subDetail.ID, subs[0].ID)
+	}
+
+	// 4. Get submission detail
+	fetched, err := svc.GetSubmission(ctx, userID, subDetail.ID)
+	if err != nil {
+		t.Fatalf("failed to get submission detail: %v", err)
+	}
+	if fetched.ID != subDetail.ID {
+		t.Errorf("expected matching submission ID")
+	}
+
+	// 5. Unauthorized access check (another user cannot access this submission)
+	otherUser := uuid.New()
+	_, err = svc.GetSubmission(ctx, otherUser, subDetail.ID)
+	if !errors.Is(err, challenges.ErrUnauthorized) {
+		t.Fatalf("expected ErrUnauthorized for other user, got: %v", err)
 	}
 }

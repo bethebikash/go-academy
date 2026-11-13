@@ -35,6 +35,42 @@ type TestCase struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
+// Submissions DTOs
+
+type RunCodeRequest struct {
+	Code string `json:"code"`
+}
+
+type SubmissionSummary struct {
+	ID              uuid.UUID `json:"id"`
+	ChallengeID     uuid.UUID `json:"challenge_id"`
+	UserID          uuid.UUID `json:"user_id"`
+	Status          string    `json:"status"`
+	TotalTestCases  int       `json:"total_test_cases"`
+	PassedTestCases int       `json:"passed_test_cases"`
+	ExecutionTimeMs int       `json:"execution_time_ms"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+type SubmissionResultItem struct {
+	ID              uuid.UUID `json:"id"`
+	TestCaseTitle   string    `json:"test_case_title"`
+	Passed          bool      `json:"passed"`
+	Hidden          bool      `json:"hidden"`
+	Input           string    `json:"input,omitempty"`
+	ExpectedOutput  string    `json:"expected_output,omitempty"`
+	ActualOutput    string    `json:"actual_output,omitempty"`
+	ExecutionTimeMs int       `json:"execution_time_ms"`
+	ErrorMessage    *string   `json:"error_message,omitempty"`
+}
+
+type SubmissionDetail struct {
+	SubmissionSummary
+	Code         string                 `json:"code"`
+	ErrorOutput  *string                `json:"error_output,omitempty"`
+	TestOutcomes []SubmissionResultItem `json:"test_outcomes"`
+}
+
 // ChallengeSummary for catalog listing
 type ChallengeSummary struct {
 	ID               uuid.UUID  `json:"id"`

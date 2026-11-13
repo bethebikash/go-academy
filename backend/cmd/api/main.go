@@ -28,6 +28,7 @@ import (
 	"go-academy/backend/internal/notes"
 	"go-academy/backend/internal/platform/response"
 	"go-academy/backend/internal/progress"
+	"go-academy/backend/internal/runner"
 	"go-academy/backend/internal/users"
 )
 
@@ -89,7 +90,8 @@ func main() {
 	progressService := progress.NewService(db)
 	noteService := notes.NewService(db)
 	bookmarkService := bookmarks.NewService(db)
-	challengeService := challenges.NewService(db)
+	codeRunner := runner.New(cfg)
+	challengeService := challenges.NewService(db, codeRunner)
 
 	// HTTP Handlers
 	healthHandler := health.NewHandler(db)
@@ -190,9 +192,13 @@ func main() {
 				r.Delete("/lessons/{lessonId}", bookmarkHandler.DeleteLessonBookmark)
 			})
 
-			// Coding Challenges
+			// Coding Challenges & Submissions
 			r.Get("/challenges", challengeHandler.ListChallenges)
 			r.Get("/challenges/{slug}", challengeHandler.GetChallenge)
+			r.Post("/challenges/{slug}/run", challengeHandler.RunSampleTests)
+			r.Post("/challenges/{slug}/submit", challengeHandler.SubmitChallenge)
+			r.Get("/challenges/{slug}/submissions", challengeHandler.ListSubmissions)
+			r.Get("/challenges/{slug}/submissions/{id}", challengeHandler.GetSubmission)
 		})
 
 		// Admin routes (Protected by authentication + admin role)

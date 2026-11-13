@@ -25,6 +25,9 @@ type Config struct {
 	CookieDomain       string
 	RateLimitLogin     int
 	RateLimitRegister  int
+	RunnerMode         string
+	RunnerImage        string
+	RunnerTimeout      time.Duration
 }
 
 // Load reads and validates configuration from environment variables.
@@ -46,6 +49,9 @@ func Load() (*Config, error) {
 		CookieDomain:       getEnv("COOKIE_DOMAIN", "localhost"),
 		RateLimitLogin:     getEnvInt("RATE_LIMIT_LOGIN", 5),
 		RateLimitRegister:  getEnvInt("RATE_LIMIT_REGISTER", 5),
+		RunnerMode:         getEnv("RUNNER_MODE", "auto"),
+		RunnerImage:        getEnv("RUNNER_IMAGE", "golang:alpine"),
+		RunnerTimeout:      getEnvDuration("RUNNER_TIMEOUT", 5*time.Second),
 	}
 
 	if err := cfg.Validate(); err != nil {

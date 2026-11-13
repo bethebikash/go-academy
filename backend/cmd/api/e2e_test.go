@@ -22,6 +22,7 @@ import (
 	"go-academy/backend/internal/middleware"
 	"go-academy/backend/internal/notes"
 	"go-academy/backend/internal/progress"
+	"go-academy/backend/internal/runner"
 	"go-academy/backend/internal/users"
 )
 
@@ -49,7 +50,8 @@ func TestEndToEndPlatformFlow(t *testing.T) {
 	progressService := progress.NewService(db)
 	noteService := notes.NewService(db)
 	bookmarkService := bookmarks.NewService(db)
-	challengeService := challenges.NewService(db)
+	codeRunner := runner.NewProcessRunner(5 * time.Second)
+	challengeService := challenges.NewService(db, codeRunner)
 
 	authHandler := auth.NewHandler(authService, userService, cfg)
 	invitationHandler := invitations.NewHandler(invitationService, cfg)
@@ -99,6 +101,10 @@ func TestEndToEndPlatformFlow(t *testing.T) {
 
 			r.Get("/challenges", challengeHandler.ListChallenges)
 			r.Get("/challenges/{slug}", challengeHandler.GetChallenge)
+			r.Post("/challenges/{slug}/run", challengeHandler.RunSampleTests)
+			r.Post("/challenges/{slug}/submit", challengeHandler.SubmitChallenge)
+			r.Get("/challenges/{slug}/submissions", challengeHandler.ListSubmissions)
+			r.Get("/challenges/{slug}/submissions/{id}", challengeHandler.GetSubmission)
 		})
 
 		r.Route("/admin", func(r chi.Router) {
@@ -436,6 +442,38 @@ func TestEndToEndPlatformFlow(t *testing.T) {
 	}
 	if learnerChallengeResp.Data.SolutionCode != nil {
 		t.Fatal("solution code exposed to learner!")
+	}
+
+	// Learner runs sample tests
+	runCodePayload, _ := json.Marshal(map[string]string{
+		"code": "package main\n\nfunc Run() string { return \"\" }",
+	})
+	req, _ = http.NewRequest(http.MethodPost, server.URL+"/api/v1/challenges/"+challengeSlug+"/run", bytes.NewReader(runCodePayload))
+	req.Header.Set("Authorization", "Bearer "+learnerToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for running sample tests, got %d", resp.StatusCode)
+	}
+
+	// Learner submits solution
+	submitPayload, _ := json.Marshal(map[string]string{
+		"code": "package main\n\nfunc Run() string { return \"pass\" }",
+	})
+	req, _ = http.NewRequest(http.MethodPost, server.URL+"/api/v1/challenges/"+challengeSlug+"/submit", bytes.NewReader(submitPayload))
+	req.Header.Set("Authorization", "Bearer "+learnerToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 for submitting challenge, got %d", resp.StatusCode)
+	}
+
+	// Learner lists submissions
+	req, _ = http.NewRequest(http.MethodGet, server.URL+"/api/v1/challenges/"+challengeSlug+"/submissions", nil)
+	req.Header.Set("Authorization", "Bearer "+learnerToken)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for listing challenge submissions, got %d", resp.StatusCode)
 	}
 
 	// Step 7: Admin disables learner account

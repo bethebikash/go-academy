@@ -10,27 +10,26 @@ import {
   Check,
   FileCode,
   FileText,
+  History,
   Clock,
   Sparkles,
   AlertCircle,
   Send,
   Save,
   Tag as TagIcon,
+  Terminal,
 } from 'lucide-react'
 import { apiRequest } from '../lib/api'
-import { ChallengeDetail, DifficultyLevel, Note } from '../types'
+import {
+  ChallengeDetail,
+  DifficultyLevel,
+  Note,
+  ExecutionResult,
+  SubmissionDetail,
+  SubmissionSummary,
+  TestCaseOutcome,
+} from '../types'
 import MarkdownViewer from '../components/content/MarkdownViewer'
-
-interface ExecutionResult {
-  testCaseId: string
-  title: string
-  passed: boolean
-  input: string
-  expected: string
-  actual: string
-  executionTimeMs: number
-  logs?: string
-}
 
 export default function ChallengeWorkspace() {
   const { slug } = useParams<{ slug: string }>()
@@ -40,14 +39,16 @@ export default function ChallengeWorkspace() {
 
   // Code editor state
   const [code, setCode] = useState<string>('')
-  const [activeTab, setActiveTab] = useState<'problem' | 'notes'>('problem')
+  const [activeTab, setActiveTab] = useState<'problem' | 'notes' | 'history'>('problem')
   const [activeTestIndex, setActiveTestIndex] = useState<number>(0)
   const [copiedCode, setCopiedCode] = useState(false)
 
   // Execution state
   const [isRunning, setIsRunning] = useState(false)
-  const [results, setResults] = useState<ExecutionResult[] | null>(null)
-  const [runnerMessage, setRunnerMessage] = useState<string | null>(null)
+  const [executionResult, setExecutionResult] = useState<ExecutionResult | null>(null)
+  const [lastSubmission, setLastSubmission] = useState<SubmissionDetail | null>(null)
+  const [submissions, setSubmissions] = useState<SubmissionSummary[]>([])
+  const [loadingSubmissions, setLoadingSubmissions] = useState(false)
 
   // Notes state
   const [noteTitle, setNoteTitle] = useState('')
@@ -61,6 +62,7 @@ export default function ChallengeWorkspace() {
   useEffect(() => {
     if (slug) {
       loadChallenge(slug)
+      loadSubmissions(slug)
     }
   }, [slug])
 
@@ -71,7 +73,6 @@ export default function ChallengeWorkspace() {
       const data = await apiRequest<ChallengeDetail>(`/challenges/${challengeSlug}`)
       setChallenge(data)
 
-      // Restore saved code from local storage if available, otherwise use starter code
       const savedCode = localStorage.getItem(`code_${challengeSlug}`)
       if (savedCode) {
         setCode(savedCode)
@@ -84,6 +85,18 @@ export default function ChallengeWorkspace() {
       setError(err?.message || 'Failed to load challenge')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadSubmissions = async (challengeSlug: string) => {
+    try {
+      setLoadingSubmissions(true)
+      const data = await apiRequest<SubmissionSummary[]>(`/challenges/${challengeSlug}/submissions`)
+      setSubmissions(data || [])
+    } catch {
+      // Ignore initial history failure if none exist
+    } finally {
+      setLoadingSubmissions(false)
     }
   }
 
@@ -109,7 +122,6 @@ export default function ChallengeWorkspace() {
     setTimeout(() => setCopiedCode(false), 2000)
   }
 
-  // Handle Tab key in code editor
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Tab') {
       e.preventDefault()
@@ -127,43 +139,68 @@ export default function ChallengeWorkspace() {
 
   // Run sample tests
   const handleRunTests = async () => {
-    if (!challenge || challenge.sample_test_cases.length === 0) return
-    setIsRunning(true)
-    setRunnerMessage(null)
+    if (!slug) return
+    try {
+      setIsRunning(true)
+      setExecutionResult(null)
+      setActiveTestIndex(0)
 
-    // Simulate validation and execution check
-    setTimeout(() => {
-      const mockResults: ExecutionResult[] = challenge.sample_test_cases.map((tc, idx) => {
-        // Quick syntax / structure verification
-        const hasPackage = code.includes('package main')
-        const passed = hasPackage && code.length > challenge.starter_code.length
-        return {
-          testCaseId: tc.id,
-          title: tc.title || `Test Case ${idx + 1}`,
-          passed: passed,
-          input: tc.input,
-          expected: tc.expected_output,
-          actual: passed ? tc.expected_output : 'nil / output mismatch',
-          executionTimeMs: Math.floor(Math.random() * 8) + 2,
-          logs: hasPackage ? '=== RUN Test' + (idx + 1) + '\n--- PASS' : 'syntax check error: package main declaration required',
-        }
+      const res = await apiRequest<ExecutionResult>(`/challenges/${slug}/run`, {
+        method: 'POST',
+        body: JSON.stringify({ code }),
       })
-      setResults(mockResults)
+      setExecutionResult(res)
+    } catch (err: any) {
+      setExecutionResult({
+        status: 'error',
+        total_tests: 0,
+        passed_tests: 0,
+        execution_time_ms: 0,
+        compiler_output: err?.message || 'Sandbox execution request failed',
+        test_outcomes: [],
+      })
+    } finally {
       setIsRunning(false)
-      setRunnerMessage('Sample tests evaluated against local syntax rules. Full isolated Docker sandbox executes in Phase 5.')
-    }, 700)
+    }
   }
 
-  // Submit Solution
+  // Submit solution
   const handleSubmit = async () => {
-    if (!challenge) return
-    setIsRunning(true)
-    setRunnerMessage(null)
+    if (!slug) return
+    try {
+      setIsRunning(true)
+      setExecutionResult(null)
+      setLastSubmission(null)
+      setActiveTestIndex(0)
 
-    setTimeout(() => {
+      const sub = await apiRequest<SubmissionDetail>(`/challenges/${slug}/submit`, {
+        method: 'POST',
+        body: JSON.stringify({ code }),
+      })
+
+      setLastSubmission(sub)
+      setExecutionResult({
+        status: sub.status as any,
+        total_tests: sub.total_test_cases,
+        passed_tests: sub.passed_test_cases,
+        execution_time_ms: sub.execution_time_ms,
+        compiler_output: sub.error_output,
+        test_outcomes: sub.test_outcomes,
+      })
+
+      loadSubmissions(slug)
+    } catch (err: any) {
+      setExecutionResult({
+        status: 'error',
+        total_tests: 0,
+        passed_tests: 0,
+        execution_time_ms: 0,
+        compiler_output: err?.message || 'Submission evaluation request failed',
+        test_outcomes: [],
+      })
+    } finally {
       setIsRunning(false)
-      setRunnerMessage('Submission queued. Isolated Docker Runner sandbox with bounded CPU & memory triggers in Phase 5.')
-    }, 800)
+    }
   }
 
   // Save Note
@@ -192,6 +229,12 @@ export default function ChallengeWorkspace() {
       alert('Failed to save note: ' + (err?.message || 'Unknown error'))
     } finally {
       setSavingNote(false)
+    }
+  }
+
+  const loadPastCode = (pastCode: string) => {
+    if (window.confirm('Load this submission code into your editor? Your current unsaved edits will be replaced.')) {
+      handleCodeChange(pastCode)
     }
   }
 
@@ -238,9 +281,10 @@ export default function ChallengeWorkspace() {
     )
   }
 
-  // Generate line numbers
   const lineCount = Math.max(code.split('\n').length, 18)
   const lineNumbers = Array.from({ length: lineCount }, (_, i) => i + 1)
+  const outcomes: TestCaseOutcome[] = executionResult?.test_outcomes || []
+  const activeOutcome = outcomes[activeTestIndex]
 
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)] -m-8 overflow-hidden bg-neutral-950">
@@ -275,9 +319,9 @@ export default function ChallengeWorkspace() {
 
       {/* Split Pane Container */}
       <div className="flex-1 flex min-h-0">
-        {/* Left Pane: Problem Description & Notes */}
+        {/* Left Pane */}
         <div className="w-1/2 border-r border-neutral-800/80 flex flex-col bg-neutral-900/20">
-          {/* Left Tabs */}
+          {/* Tabs */}
           <div className="h-11 border-b border-neutral-800 bg-neutral-900/40 px-4 flex items-center gap-2 shrink-0">
             <button
               onClick={() => setActiveTab('problem')}
@@ -288,7 +332,7 @@ export default function ChallengeWorkspace() {
               }`}
             >
               <FileCode className="h-3.5 w-3.5 text-indigo-400" />
-              Problem Description
+              Problem
             </button>
             <button
               onClick={() => setActiveTab('notes')}
@@ -300,6 +344,17 @@ export default function ChallengeWorkspace() {
             >
               <FileText className="h-3.5 w-3.5 text-amber-400" />
               Notes
+            </button>
+            <button
+              onClick={() => setActiveTab('history')}
+              className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition cursor-pointer ${
+                activeTab === 'history'
+                  ? 'bg-neutral-800 text-white font-semibold'
+                  : 'text-neutral-400 hover:text-white hover:bg-neutral-800/50'
+              }`}
+            >
+              <History className="h-3.5 w-3.5 text-sky-400" />
+              History ({submissions.length})
             </button>
           </div>
 
@@ -348,8 +403,8 @@ export default function ChallengeWorkspace() {
                   </div>
                 )}
               </div>
-            ) : (
-              /* Notes Editor Tab */
+            ) : activeTab === 'notes' ? (
+              /* Notes Tab */
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">
@@ -387,7 +442,7 @@ export default function ChallengeWorkspace() {
                   <div>
                     <label className="block text-[11px] font-medium text-neutral-400 mb-1 flex items-center gap-1">
                       <TagIcon className="h-3 w-3" />
-                      Tags (comma separated)
+                      Tags
                     </label>
                     <input
                       type="text"
@@ -398,16 +453,75 @@ export default function ChallengeWorkspace() {
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-medium text-neutral-400 mb-1">Notes (Markdown)</label>
+                    <label className="block text-[11px] font-medium text-neutral-400 mb-1">Notes</label>
                     <textarea
                       rows={12}
                       value={noteContent}
                       onChange={(e) => setNoteContent(e.target.value)}
-                      placeholder="Record your thoughts, algorithm complexity notes, or edge cases here..."
+                      placeholder="Record algorithmic complexity, tradeoffs, or key observations..."
                       className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-3 text-xs text-neutral-200 font-mono placeholder-neutral-600 focus:outline-none focus:border-indigo-500 resize-none"
                     />
                   </div>
                 </div>
+              </div>
+            ) : (
+              /* Submissions History Tab */
+              <div className="space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">
+                  Past Submissions
+                </h3>
+                {loadingSubmissions ? (
+                  <div className="text-xs text-neutral-400 py-6 text-center">Loading history...</div>
+                ) : submissions.length === 0 ? (
+                  <div className="text-xs text-neutral-500 py-8 text-center bg-neutral-900/40 rounded-xl border border-neutral-800">
+                    No submissions recorded yet. Submit your solution to track progress!
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {submissions.map((sub) => (
+                      <div
+                        key={sub.id}
+                        className="rounded-lg border border-neutral-800 bg-neutral-900/60 p-3.5 flex items-center justify-between text-xs"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                                sub.status === 'passed'
+                                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                  : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                              }`}
+                            >
+                              {sub.status}
+                            </span>
+                            <span className="font-mono text-neutral-300">
+                              {sub.passed_test_cases}/{sub.total_test_cases} passed
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-neutral-500">
+                            {new Date(sub.created_at).toLocaleString()} • {sub.execution_time_ms}ms
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={async () => {
+                            try {
+                              const detail = await apiRequest<SubmissionDetail>(
+                                `/challenges/${slug}/submissions/${sub.id}`,
+                              )
+                              loadPastCode(detail.code)
+                            } catch (e: any) {
+                              alert('Failed to load past submission code: ' + e?.message)
+                            }
+                          }}
+                          className="px-2.5 py-1 text-[11px] font-medium bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded transition cursor-pointer"
+                        >
+                          Restore Code
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -419,7 +533,7 @@ export default function ChallengeWorkspace() {
           <div className="h-11 border-b border-neutral-800 bg-neutral-900/50 px-4 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2">
               <span className="font-mono text-xs font-semibold text-neutral-300">solution.go</span>
-              <span className="text-[10px] text-neutral-500">Go 1.23</span>
+              <span className="text-[10px] text-neutral-500 font-mono">Go 1.23</span>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -462,87 +576,121 @@ export default function ChallengeWorkspace() {
             />
           </div>
 
-          {/* Test Execution Results Area */}
-          {results && (
-            <div className="h-48 border-t border-neutral-800 bg-neutral-900/90 flex flex-col shrink-0">
-              {/* Test Case Tab Bar */}
+          {/* Execution Drawer / Results Area */}
+          {executionResult && (
+            <div className="h-52 border-t border-neutral-800 bg-neutral-900/90 flex flex-col shrink-0">
+              {/* Status Header */}
               <div className="h-9 border-b border-neutral-800 px-4 flex items-center justify-between bg-neutral-950/70">
-                <div className="flex items-center gap-2">
-                  {results.map((res, idx) => (
-                    <button
-                      key={res.testCaseId}
-                      onClick={() => setActiveTestIndex(idx)}
-                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium transition cursor-pointer ${
-                        activeTestIndex === idx
-                          ? 'bg-neutral-800 text-white font-semibold'
-                          : 'text-neutral-400 hover:text-white'
-                      }`}
-                    >
-                      {res.passed ? (
-                        <CheckCircle2 className="h-3 w-3 text-emerald-400" />
-                      ) : (
-                        <XCircle className="h-3 w-3 text-rose-400" />
-                      )}
-                      <span>Case {idx + 1}</span>
-                    </button>
-                  ))}
+                <div className="flex items-center gap-2 overflow-x-auto">
+                  {executionResult.status === 'compile_error' ? (
+                    <div className="flex items-center gap-1.5 text-rose-400 font-mono text-xs">
+                      <XCircle className="h-3.5 w-3.5" />
+                      <span>Compilation Error</span>
+                    </div>
+                  ) : executionResult.status === 'timed_out' ? (
+                    <div className="flex items-center gap-1.5 text-amber-400 font-mono text-xs">
+                      <Clock className="h-3.5 w-3.5" />
+                      <span>Execution Timed Out (5s limit)</span>
+                    </div>
+                  ) : (
+                    outcomes.map((o, idx) => (
+                      <button
+                        key={o.test_case_id || idx}
+                        onClick={() => setActiveTestIndex(idx)}
+                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium transition cursor-pointer shrink-0 ${
+                          activeTestIndex === idx
+                            ? 'bg-neutral-800 text-white font-semibold'
+                            : 'text-neutral-400 hover:text-white'
+                        }`}
+                      >
+                        {o.passed ? (
+                          <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+                        ) : (
+                          <XCircle className="h-3 w-3 text-rose-400" />
+                        )}
+                        <span>{o.hidden ? `Hidden ${idx + 1}` : `Case ${idx + 1}`}</span>
+                      </button>
+                    ))
+                  )}
                 </div>
-                <div className="text-[11px] text-neutral-400 font-mono">
-                  {results.filter((r) => r.passed).length}/{results.length} passed
+
+                <div className="flex items-center gap-3 text-[11px] font-mono text-neutral-400 shrink-0">
+                  <span>{executionResult.execution_time_ms}ms</span>
+                  <span>
+                    {executionResult.passed_tests}/{executionResult.total_tests} passed
+                  </span>
                 </div>
               </div>
 
-              {/* Active Test Case Detail */}
-              {results[activeTestIndex] && (
-                <div className="flex-1 p-3 overflow-y-auto font-mono text-xs space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <div className="text-[10px] text-neutral-500 uppercase font-semibold">Input</div>
-                      <div className="bg-neutral-950 p-2 rounded text-neutral-300 text-[11px] border border-neutral-800">
-                        {results[activeTestIndex].input}
+              {/* Drawer Body */}
+              <div className="flex-1 p-3 overflow-y-auto font-mono text-xs space-y-2">
+                {executionResult.compiler_output ? (
+                  <div className="p-3 bg-neutral-950 rounded border border-rose-900/40 text-rose-300 font-mono text-[11px] whitespace-pre-wrap leading-relaxed">
+                    <div className="flex items-center gap-2 text-neutral-400 mb-2 font-semibold">
+                      <Terminal className="h-3.5 w-3.5" />
+                      Compiler Logs
+                    </div>
+                    {executionResult.compiler_output}
+                  </div>
+                ) : activeOutcome ? (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <div className="text-[10px] text-neutral-500 uppercase font-semibold">Input</div>
+                        <div className="bg-neutral-950 p-2 rounded text-indigo-300 text-[11px] border border-neutral-800 overflow-x-auto">
+                          {activeOutcome.input || 'None'}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] text-neutral-500 uppercase font-semibold">
+                          Expected Output
+                        </div>
+                        <div className="bg-neutral-950 p-2 rounded text-emerald-400 text-[11px] border border-neutral-800 overflow-x-auto">
+                          {activeOutcome.expected_output || 'None'}
+                        </div>
                       </div>
                     </div>
+
                     <div>
-                      <div className="text-[10px] text-neutral-500 uppercase font-semibold">Expected Output</div>
-                      <div className="bg-neutral-950 p-2 rounded text-emerald-400 text-[11px] border border-neutral-800">
-                        {results[activeTestIndex].expected}
+                      <div className="text-[10px] text-neutral-500 uppercase font-semibold">
+                        Actual Output
+                      </div>
+                      <div
+                        className={`p-2 rounded text-[11px] border font-mono ${
+                          activeOutcome.passed
+                            ? 'bg-emerald-950/20 text-emerald-300 border-emerald-900/40'
+                            : 'bg-rose-950/20 text-rose-300 border-rose-900/40'
+                        }`}
+                      >
+                        {activeOutcome.actual_output || 'No output produced'}
                       </div>
                     </div>
+
+                    {activeOutcome.error_message && (
+                      <div className="text-[11px] text-rose-400 bg-rose-950/30 p-2 rounded border border-rose-900/30">
+                        {activeOutcome.error_message}
+                      </div>
+                    )}
                   </div>
-                  <div>
-                    <div className="text-[10px] text-neutral-500 uppercase font-semibold">Actual Output</div>
-                    <div
-                      className={`p-2 rounded text-[11px] border font-mono ${
-                        results[activeTestIndex].passed
-                          ? 'bg-emerald-950/20 text-emerald-300 border-emerald-900/40'
-                          : 'bg-rose-950/20 text-rose-300 border-rose-900/40'
-                      }`}
-                    >
-                      {results[activeTestIndex].actual}
-                    </div>
-                  </div>
-                </div>
-              )}
+                ) : null}
+              </div>
             </div>
           )}
 
-          {/* Feedback banner */}
-          {runnerMessage && (
-            <div className="px-4 py-2 bg-indigo-950/40 border-t border-indigo-900/40 text-[11px] text-indigo-300 flex items-center justify-between">
-              <span>{runnerMessage}</span>
-              <button
-                onClick={() => setRunnerMessage(null)}
-                className="text-neutral-400 hover:text-white cursor-pointer"
-              >
-                ×
-              </button>
+          {/* Success Banner */}
+          {lastSubmission && lastSubmission.status === 'passed' && (
+            <div className="px-4 py-2 bg-emerald-950/50 border-t border-emerald-800/50 text-xs text-emerald-300 flex items-center justify-between">
+              <div className="flex items-center gap-2 font-medium">
+                <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                <span>All test cases passed! Solution verified in {lastSubmission.execution_time_ms}ms.</span>
+              </div>
             </div>
           )}
 
-          {/* Bottom Execution Action Bar */}
+          {/* Bottom Execution Bar */}
           <div className="h-14 border-t border-neutral-800 bg-neutral-900/90 px-4 flex items-center justify-between shrink-0">
             <div className="text-xs text-neutral-400 font-mono">
-              Press Tab to indent
+              Docker Sandbox Boundary: Active
             </div>
 
             <div className="flex items-center gap-3">
@@ -552,7 +700,7 @@ export default function ChallengeWorkspace() {
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-semibold transition cursor-pointer disabled:opacity-50"
               >
                 <Play className="h-3.5 w-3.5 text-emerald-400 fill-emerald-400" />
-                <span>{isRunning ? 'Evaluating...' : 'Run Tests'}</span>
+                <span>{isRunning ? 'Evaluating...' : 'Run Sample Tests'}</span>
               </button>
 
               <button

@@ -34,6 +34,35 @@ type Challenge struct {
 	PublishedAt      pgtype.Timestamptz `json:"published_at"`
 }
 
+type ChallengeSubmission struct {
+	ID              pgtype.UUID        `json:"id"`
+	UserID          pgtype.UUID        `json:"user_id"`
+	ChallengeID     pgtype.UUID        `json:"challenge_id"`
+	Code            string             `json:"code"`
+	Status          string             `json:"status"`
+	TotalTestCases  int32              `json:"total_test_cases"`
+	PassedTestCases int32              `json:"passed_test_cases"`
+	ExecutionTimeMs int32              `json:"execution_time_ms"`
+	ErrorOutput     pgtype.Text        `json:"error_output"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ChallengeSubmissionResult struct {
+	ID              pgtype.UUID        `json:"id"`
+	SubmissionID    pgtype.UUID        `json:"submission_id"`
+	TestCaseID      pgtype.UUID        `json:"test_case_id"`
+	TestCaseTitle   string             `json:"test_case_title"`
+	Passed          bool               `json:"passed"`
+	Hidden          bool               `json:"hidden"`
+	Input           string             `json:"input"`
+	ExpectedOutput  string             `json:"expected_output"`
+	ActualOutput    string             `json:"actual_output"`
+	ExecutionTimeMs int32              `json:"execution_time_ms"`
+	ErrorMessage    pgtype.Text        `json:"error_message"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
 type ChallengeTestCase struct {
 	ID             pgtype.UUID        `json:"id"`
 	ChallengeID    pgtype.UUID        `json:"challenge_id"`

@@ -11,23 +11,27 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"go-academy/backend/internal/database"
 	"go-academy/backend/internal/database/sqlc"
+	"go-academy/backend/internal/runner"
 )
 
 var (
 	ErrNotFound     = errors.New("challenge not found")
 	ErrSlugExists   = errors.New("slug already in use")
 	ErrInvalidInput = errors.New("invalid input")
+	ErrUnauthorized = errors.New("unauthorized")
 )
 
 type Service struct {
-	db *database.DB
+	db     *database.DB
+	runner runner.Runner
 }
 
-func NewService(db *database.DB) *Service {
-	return &Service{db: db}
+func NewService(db *database.DB, r runner.Runner) *Service {
+	return &Service{db: db, runner: r}
 }
 
 // GenerateSlug converts title to URL-friendly string.
@@ -417,4 +421,315 @@ func (s *Service) DeleteChallenge(ctx context.Context, id uuid.UUID) error {
 		return fmt.Errorf("failed to delete challenge: %w", err)
 	}
 	return nil
+}
+
+// --- Execution & Submissions ---
+
+// RunSampleTests runs user code against visible sample test cases without persisting a graded submission.
+func (s *Service) RunSampleTests(ctx context.Context, slug string, code string) (*runner.ExecutionResult, error) {
+	if s.runner == nil {
+		return nil, errors.New("execution runner is not configured")
+	}
+
+	chRow, err := s.db.Queries.GetPublishedChallengeBySlug(ctx, slug)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get challenge: %w", err)
+	}
+
+	tcRows, err := s.db.Queries.ListSampleTestCasesByChallengeID(ctx, chRow.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sample test cases: %w", err)
+	}
+
+	inputs := make([]runner.TestCaseInput, len(tcRows))
+	for i, tc := range tcRows {
+		inputs[i] = runner.TestCaseInput{
+			ID:             uuid.UUID(tc.ID.Bytes),
+			Title:          tc.Title,
+			Input:          tc.Input,
+			ExpectedOutput: tc.ExpectedOutput,
+			Hidden:         false,
+		}
+	}
+
+	result, err := s.runner.Execute(ctx, runner.ExecutionRequest{
+		ChallengeSlug: chRow.Slug,
+		Code:          code,
+		TestCases:     inputs,
+		Timeout:       5 * time.Second,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("runner execution error: %w", err)
+	}
+
+	return result, nil
+}
+
+// SubmitChallenge evaluates user code against ALL test cases (both visible and hidden) and persists the submission.
+func (s *Service) SubmitChallenge(ctx context.Context, userID uuid.UUID, slug string, code string) (*SubmissionDetail, error) {
+	if s.runner == nil {
+		return nil, errors.New("execution runner is not configured")
+	}
+
+	chRow, err := s.db.Queries.GetPublishedChallengeBySlug(ctx, slug)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get challenge: %w", err)
+	}
+
+	allTcs, err := s.db.Queries.ListAllTestCasesByChallengeID(ctx, chRow.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get test cases: %w", err)
+	}
+
+	inputs := make([]runner.TestCaseInput, len(allTcs))
+	for i, tc := range allTcs {
+		inputs[i] = runner.TestCaseInput{
+			ID:             uuid.UUID(tc.ID.Bytes),
+			Title:          tc.Title,
+			Input:          tc.Input,
+			ExpectedOutput: tc.ExpectedOutput,
+			Hidden:         tc.Hidden,
+		}
+	}
+
+	execRes, err := s.runner.Execute(ctx, runner.ExecutionRequest{
+		ChallengeSlug: chRow.Slug,
+		Code:          code,
+		TestCases:     inputs,
+		Timeout:       5 * time.Second,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("runner execution error: %w", err)
+	}
+
+	// Persist submission in transaction
+	tx, err := s.db.Pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := s.db.Queries.WithTx(tx)
+
+	var errText pgtype.Text
+	if execRes.CompilerOutput != "" {
+		errText = pgtype.Text{String: execRes.CompilerOutput, Valid: true}
+	}
+
+	subRow, err := qtx.CreateSubmission(ctx, sqlc.CreateSubmissionParams{
+		UserID:          toPgUUID(userID),
+		ChallengeID:     chRow.ID,
+		Code:            code,
+		Status:          execRes.Status,
+		TotalTestCases:  int32(execRes.TotalTests),
+		PassedTestCases: int32(execRes.PassedTests),
+		ExecutionTimeMs: int32(execRes.ExecutionTimeMs),
+		ErrorOutput:     errText,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to record submission: %w", err)
+	}
+
+	sanitizedOutcomes := make([]SubmissionResultItem, 0, len(execRes.TestOutcomes))
+	for _, o := range execRes.TestOutcomes {
+		var tcUUID pgtype.UUID
+		if o.TestCaseID != uuid.Nil {
+			tcUUID = toPgUUID(o.TestCaseID)
+		}
+
+		var oErr pgtype.Text
+		if o.ErrorMessage != "" {
+			oErr = pgtype.Text{String: o.ErrorMessage, Valid: true}
+		}
+
+		createdRes, err := qtx.CreateSubmissionResult(ctx, sqlc.CreateSubmissionResultParams{
+			SubmissionID:    subRow.ID,
+			TestCaseID:      tcUUID,
+			TestCaseTitle:   o.Title,
+			Passed:          o.Passed,
+			Hidden:          o.Hidden,
+			Input:           o.Input,
+			ExpectedOutput:  o.ExpectedOutput,
+			ActualOutput:    o.ActualOutput,
+			ExecutionTimeMs: int32(o.ExecutionTimeMs),
+			ErrorMessage:    oErr,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to record test case result: %w", err)
+		}
+
+		// Sanitize hidden test case outputs before returning to user
+		input := o.Input
+		expected := o.ExpectedOutput
+		actual := o.ActualOutput
+		var itemErr *string
+		if o.ErrorMessage != "" {
+			itemErr = &o.ErrorMessage
+		}
+		if o.Hidden {
+			input = "[Hidden test case]"
+			expected = "[Hidden test case]"
+			if !o.Passed {
+				actual = "[Hidden test failed]"
+				hiddenMsg := "Hidden test case evaluation failed. Check edge cases."
+				itemErr = &hiddenMsg
+			} else {
+				actual = "[Hidden test passed]"
+			}
+		}
+
+		sanitizedOutcomes = append(sanitizedOutcomes, SubmissionResultItem{
+			ID:              uuid.UUID(createdRes.ID.Bytes),
+			TestCaseTitle:   o.Title,
+			Passed:          o.Passed,
+			Hidden:          o.Hidden,
+			Input:           input,
+			ExpectedOutput:  expected,
+			ActualOutput:    actual,
+			ExecutionTimeMs: int(o.ExecutionTimeMs),
+			ErrorMessage:    itemErr,
+		})
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit submission: %w", err)
+	}
+
+	var compileOut *string
+	if execRes.CompilerOutput != "" {
+		compileOut = &execRes.CompilerOutput
+	}
+
+	return &SubmissionDetail{
+		SubmissionSummary: SubmissionSummary{
+			ID:              uuid.UUID(subRow.ID.Bytes),
+			ChallengeID:     uuid.UUID(subRow.ChallengeID.Bytes),
+			UserID:          uuid.UUID(subRow.UserID.Bytes),
+			Status:          subRow.Status,
+			TotalTestCases:  int(subRow.TotalTestCases),
+			PassedTestCases: int(subRow.PassedTestCases),
+			ExecutionTimeMs: int(subRow.ExecutionTimeMs),
+			CreatedAt:       subRow.CreatedAt.Time,
+		},
+		Code:         code,
+		ErrorOutput:  compileOut,
+		TestOutcomes: sanitizedOutcomes,
+	}, nil
+}
+
+// ListSubmissions returns previous submission attempts for a user on a challenge.
+func (s *Service) ListSubmissions(ctx context.Context, userID uuid.UUID, slug string) ([]SubmissionSummary, error) {
+	chRow, err := s.db.Queries.GetPublishedChallengeBySlug(ctx, slug)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get challenge: %w", err)
+	}
+
+	rows, err := s.db.Queries.ListSubmissionsByChallengeAndUser(ctx, sqlc.ListSubmissionsByChallengeAndUserParams{
+		UserID:      toPgUUID(userID),
+		ChallengeID: chRow.ID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list submissions: %w", err)
+	}
+
+	items := make([]SubmissionSummary, len(rows))
+	for i, r := range rows {
+		items[i] = SubmissionSummary{
+			ID:              uuid.UUID(r.ID.Bytes),
+			ChallengeID:     uuid.UUID(r.ChallengeID.Bytes),
+			UserID:          uuid.UUID(r.UserID.Bytes),
+			Status:          r.Status,
+			TotalTestCases:  int(r.TotalTestCases),
+			PassedTestCases: int(r.PassedTestCases),
+			ExecutionTimeMs: int(r.ExecutionTimeMs),
+			CreatedAt:       r.CreatedAt.Time,
+		}
+	}
+
+	return items, nil
+}
+
+// GetSubmission retrieves a specific submission with its outcomes.
+func (s *Service) GetSubmission(ctx context.Context, userID uuid.UUID, submissionID uuid.UUID) (*SubmissionDetail, error) {
+	subRow, err := s.db.Queries.GetSubmissionByID(ctx, toPgUUID(submissionID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get submission: %w", err)
+	}
+
+	if uuid.UUID(subRow.UserID.Bytes) != userID {
+		return nil, ErrUnauthorized
+	}
+
+	results, err := s.db.Queries.ListSubmissionResults(ctx, subRow.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get submission results: %w", err)
+	}
+
+	outcomes := make([]SubmissionResultItem, len(results))
+	for i, r := range results {
+		input := r.Input
+		expected := r.ExpectedOutput
+		actual := r.ActualOutput
+		var itemErr *string
+		if r.ErrorMessage.Valid {
+			itemErr = &r.ErrorMessage.String
+		}
+
+		if r.Hidden {
+			input = "[Hidden test case]"
+			expected = "[Hidden test case]"
+			if !r.Passed {
+				actual = "[Hidden test failed]"
+				hiddenMsg := "Hidden test case evaluation failed. Check edge cases."
+				itemErr = &hiddenMsg
+			} else {
+				actual = "[Hidden test passed]"
+			}
+		}
+
+		outcomes[i] = SubmissionResultItem{
+			ID:              uuid.UUID(r.ID.Bytes),
+			TestCaseTitle:   r.TestCaseTitle,
+			Passed:          r.Passed,
+			Hidden:          r.Hidden,
+			Input:           input,
+			ExpectedOutput:  expected,
+			ActualOutput:    actual,
+			ExecutionTimeMs: int(r.ExecutionTimeMs),
+			ErrorMessage:    itemErr,
+		}
+	}
+
+	var compileOut *string
+	if subRow.ErrorOutput.Valid {
+		compileOut = &subRow.ErrorOutput.String
+	}
+
+	return &SubmissionDetail{
+		SubmissionSummary: SubmissionSummary{
+			ID:              uuid.UUID(subRow.ID.Bytes),
+			ChallengeID:     uuid.UUID(subRow.ChallengeID.Bytes),
+			UserID:          uuid.UUID(subRow.UserID.Bytes),
+			Status:          subRow.Status,
+			TotalTestCases:  int(subRow.TotalTestCases),
+			PassedTestCases: int(subRow.PassedTestCases),
+			ExecutionTimeMs: int(subRow.ExecutionTimeMs),
+			CreatedAt:       subRow.CreatedAt.Time,
+		},
+		Code:         subRow.Code,
+		ErrorOutput:  compileOut,
+		TestOutcomes: outcomes,
+	}, nil
 }

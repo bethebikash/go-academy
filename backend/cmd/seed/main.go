@@ -13,6 +13,7 @@ import (
 	"go-academy/backend/internal/config"
 	"go-academy/backend/internal/content"
 	"go-academy/backend/internal/database"
+	"go-academy/backend/internal/runner"
 	"go-academy/backend/internal/users"
 )
 
@@ -33,7 +34,8 @@ func main() {
 
 	db := database.NewDB(pool)
 	contentService := content.NewService(db)
-	challengeService := challenges.NewService(db)
+	codeRunner := runner.NewProcessRunner(5 * time.Second)
+	challengeService := challenges.NewService(db, codeRunner)
 	userService := users.NewService(db)
 
 	// Fetch or use existing admin
