@@ -18,6 +18,7 @@ import (
 
 	"go-academy/backend/internal/auth"
 	"go-academy/backend/internal/bookmarks"
+	"go-academy/backend/internal/challenges"
 	"go-academy/backend/internal/config"
 	"go-academy/backend/internal/content"
 	"go-academy/backend/internal/database"
@@ -88,6 +89,7 @@ func main() {
 	progressService := progress.NewService(db)
 	noteService := notes.NewService(db)
 	bookmarkService := bookmarks.NewService(db)
+	challengeService := challenges.NewService(db)
 
 	// HTTP Handlers
 	healthHandler := health.NewHandler(db)
@@ -98,6 +100,7 @@ func main() {
 	progressHandler := progress.NewHandler(progressService)
 	noteHandler := notes.NewHandler(noteService)
 	bookmarkHandler := bookmarks.NewHandler(bookmarkService)
+	challengeHandler := challenges.NewHandler(challengeService)
 
 	// Rate Limiters
 	loginLimiter := appmiddleware.NewIPRateLimiter(rate.Every(time.Minute/time.Duration(cfg.RateLimitLogin)), cfg.RateLimitLogin)
@@ -186,6 +189,10 @@ func main() {
 				r.Delete("/{id}", bookmarkHandler.DeleteBookmark)
 				r.Delete("/lessons/{lessonId}", bookmarkHandler.DeleteLessonBookmark)
 			})
+
+			// Coding Challenges
+			r.Get("/challenges", challengeHandler.ListChallenges)
+			r.Get("/challenges/{slug}", challengeHandler.GetChallenge)
 		})
 
 		// Admin routes (Protected by authentication + admin role)
@@ -246,6 +253,16 @@ func main() {
 				r.Put("/{id}", contentHandler.AdminUpdateLesson)
 				r.Patch("/{id}/status", contentHandler.AdminUpdateLessonStatus)
 				r.Delete("/{id}", contentHandler.AdminDeleteLesson)
+			})
+
+			// Admin coding challenges management
+			r.Route("/challenges", func(r chi.Router) {
+				r.Get("/", challengeHandler.AdminListChallenges)
+				r.Post("/", challengeHandler.AdminCreateChallenge)
+				r.Get("/{id}", challengeHandler.AdminGetChallenge)
+				r.Put("/{id}", challengeHandler.AdminUpdateChallenge)
+				r.Patch("/{id}/status", challengeHandler.AdminUpdateChallengeStatus)
+				r.Delete("/{id}", challengeHandler.AdminDeleteChallenge)
 			})
 		})
 	})

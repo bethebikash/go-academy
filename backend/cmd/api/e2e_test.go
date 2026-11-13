@@ -14,6 +14,7 @@ import (
 
 	"go-academy/backend/internal/auth"
 	"go-academy/backend/internal/bookmarks"
+	"go-academy/backend/internal/challenges"
 	"go-academy/backend/internal/config"
 	"go-academy/backend/internal/content"
 	"go-academy/backend/internal/database"
@@ -48,6 +49,7 @@ func TestEndToEndPlatformFlow(t *testing.T) {
 	progressService := progress.NewService(db)
 	noteService := notes.NewService(db)
 	bookmarkService := bookmarks.NewService(db)
+	challengeService := challenges.NewService(db)
 
 	authHandler := auth.NewHandler(authService, userService, cfg)
 	invitationHandler := invitations.NewHandler(invitationService, cfg)
@@ -56,6 +58,7 @@ func TestEndToEndPlatformFlow(t *testing.T) {
 	progressHandler := progress.NewHandler(progressService)
 	noteHandler := notes.NewHandler(noteService)
 	bookmarkHandler := bookmarks.NewHandler(bookmarkService)
+	challengeHandler := challenges.NewHandler(challengeService)
 
 	// Build full API router
 	r := chi.NewRouter()
@@ -93,6 +96,9 @@ func TestEndToEndPlatformFlow(t *testing.T) {
 				r.Get("/check", bookmarkHandler.CheckLesson)
 				r.Delete("/lessons/{lessonId}", bookmarkHandler.DeleteLessonBookmark)
 			})
+
+			r.Get("/challenges", challengeHandler.ListChallenges)
+			r.Get("/challenges/{slug}", challengeHandler.GetChallenge)
 		})
 
 		r.Route("/admin", func(r chi.Router) {
@@ -112,6 +118,15 @@ func TestEndToEndPlatformFlow(t *testing.T) {
 			r.Route("/users", func(r chi.Router) {
 				r.Get("/", userHandler.List)
 				r.Patch("/{id}/status", userHandler.UpdateStatus)
+			})
+
+			r.Route("/challenges", func(r chi.Router) {
+				r.Get("/", challengeHandler.AdminListChallenges)
+				r.Post("/", challengeHandler.AdminCreateChallenge)
+				r.Get("/{id}", challengeHandler.AdminGetChallenge)
+				r.Put("/{id}", challengeHandler.AdminUpdateChallenge)
+				r.Patch("/{id}/status", challengeHandler.AdminUpdateChallengeStatus)
+				r.Delete("/{id}", challengeHandler.AdminDeleteChallenge)
 			})
 		})
 	})
@@ -333,6 +348,94 @@ func TestEndToEndPlatformFlow(t *testing.T) {
 	resp, err = client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 for removing bookmark, got %d", resp.StatusCode)
+	}
+
+	// Step 6.9: Admin creates and publishes a challenge; Learner browses and inspects
+	challengeSlug := fmt.Sprintf("e2e-challenge-%d", time.Now().UnixNano())
+	createChallengePayload, _ := json.Marshal(map[string]interface{}{
+		"title":             "E2E Challenge",
+		"slug":              challengeSlug,
+		"description":       "Solve problem via e2e test",
+		"difficulty":        "beginner",
+		"estimated_minutes": 15,
+		"starter_code":      "package main\n\nfunc Run() string { return \"\" }",
+		"solution_code":     "package main\n\nfunc Run() string { return \"pass\" }",
+		"status":            "published",
+		"test_cases": []map[string]interface{}{
+			{
+				"title":           "Visible Test",
+				"input":           "in1",
+				"expected_output": "out1",
+				"hidden":          false,
+				"sort_order":      1,
+			},
+			{
+				"title":           "Secret Test",
+				"input":           "in2",
+				"expected_output": "out2",
+				"hidden":          true,
+				"sort_order":      2,
+			},
+		},
+	})
+	req, _ = http.NewRequest(http.MethodPost, server.URL+"/api/v1/admin/challenges", bytes.NewReader(createChallengePayload))
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 for creating challenge, got %d", resp.StatusCode)
+	}
+	var createChallengeResp struct {
+		Data struct {
+			ID           string `json:"id"`
+			SolutionCode string `json:"solution_code"`
+			TestCases    []struct {
+				ID     string `json:"id"`
+				Hidden bool   `json:"hidden"`
+			} `json:"test_cases"`
+		} `json:"data"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&createChallengeResp)
+	if len(createChallengeResp.Data.TestCases) != 2 {
+		t.Fatalf("expected admin to see 2 test cases, got %d", len(createChallengeResp.Data.TestCases))
+	}
+	if createChallengeResp.Data.SolutionCode == "" {
+		t.Fatal("expected admin to see solution code")
+	}
+
+	// Learner lists published challenges
+	req, _ = http.NewRequest(http.MethodGet, server.URL+"/api/v1/challenges", nil)
+	req.Header.Set("Authorization", "Bearer "+learnerToken)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for listing published challenges, got %d", resp.StatusCode)
+	}
+
+	// Learner fetches challenge by slug
+	req, _ = http.NewRequest(http.MethodGet, server.URL+"/api/v1/challenges/"+challengeSlug, nil)
+	req.Header.Set("Authorization", "Bearer "+learnerToken)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for getting challenge by slug, got %d", resp.StatusCode)
+	}
+	var learnerChallengeResp struct {
+		Data struct {
+			Title           string `json:"title"`
+			SampleTestCases []struct {
+				Hidden bool `json:"hidden"`
+			} `json:"sample_test_cases"`
+			SolutionCode *string `json:"solution_code,omitempty"`
+		} `json:"data"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&learnerChallengeResp)
+	if len(learnerChallengeResp.Data.SampleTestCases) != 1 {
+		t.Fatalf("expected learner to see exactly 1 sample test case, got %d", len(learnerChallengeResp.Data.SampleTestCases))
+	}
+	if learnerChallengeResp.Data.SampleTestCases[0].Hidden {
+		t.Fatal("hidden test case exposed to learner!")
+	}
+	if learnerChallengeResp.Data.SolutionCode != nil {
+		t.Fatal("solution code exposed to learner!")
 	}
 
 	// Step 7: Admin disables learner account

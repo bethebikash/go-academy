@@ -9,12 +9,16 @@ import LearningPaths from './routes/LearningPaths'
 import PathDetail from './routes/PathDetail'
 import CourseDetail from './routes/CourseDetail'
 import LessonReader from './routes/LessonReader'
+import Challenges from './routes/Challenges'
+import ChallengeWorkspace from './routes/ChallengeWorkspace'
 import Notes from './routes/Notes'
 import Bookmarks from './routes/Bookmarks'
 import AdminInvitations from './routes/admin/Invitations'
 import AdminUsers from './routes/admin/Users'
 import ContentManager from './routes/admin/ContentManager'
 import LessonEditor from './routes/admin/LessonEditor'
+import AdminChallenges from './routes/admin/AdminChallenges'
+import ChallengeEditor from './routes/admin/ChallengeEditor'
 import { Construction, ArrowLeft } from 'lucide-react'
 
 function ComingSoon({ title, phase }: { title: string; phase: string }) {
@@ -82,7 +86,8 @@ export default function App() {
             <Route path="learning-paths/:slug" element={<PathDetail />} />
             <Route path="courses/:slug" element={<CourseDetail />} />
             <Route path="lessons/:slug" element={<LessonReader />} />
-            <Route path="challenges" element={<ComingSoon title="Coding Challenges" phase="Phase 4" />} />
+            <Route path="challenges" element={<Challenges />} />
+            <Route path="challenges/:slug" element={<ChallengeWorkspace />} />
             <Route path="notes" element={<Notes />} />
             <Route path="bookmarks" element={<Bookmarks />} />
             <Route path="progress" element={<ComingSoon title="Detailed Progress" phase="Phase 6" />} />
@@ -93,6 +98,30 @@ export default function App() {
               element={
                 <ProtectedRoute requiredRole="admin">
                   <ContentManager />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="admin/challenges"
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <AdminChallenges />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="admin/challenges/new"
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <ChallengeEditor />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="admin/challenges/:id/edit"
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <ChallengeEditor />
                 </ProtectedRoute>
               }
             />

@@ -92,6 +92,10 @@ export default function AppLayout() {
                     <Layers className="h-4 w-4 text-amber-400" />
                     Content Manager
                   </NavLink>
+                  <NavLink to="/admin/challenges" className={navClass}>
+                    <Code2 className="h-4 w-4 text-amber-400" />
+                    Challenges
+                  </NavLink>
                   <NavLink to="/admin/invitations" className={navClass}>
                     <Mail className="h-4 w-4 text-amber-400" />
                     Invitations

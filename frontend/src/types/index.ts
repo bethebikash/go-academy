@@ -205,3 +205,81 @@ export interface Bookmark {
   progress_status: string
   created_at: string
 }
+
+// Challenge Types
+
+export interface TestCase {
+  id: string
+  challenge_id: string
+  title: string
+  input: string
+  expected_output: string
+  hidden: boolean
+  sort_order: number
+  created_at: string
+}
+
+export interface ChallengeSummary {
+  id: string
+  course_id?: string
+  lesson_id?: string
+  title: string
+  slug: string
+  description: string
+  difficulty: DifficultyLevel
+  estimated_minutes: number
+  starter_code: string
+  status: ContentStatus
+  sort_order: number
+  created_at: string
+  updated_at: string
+  published_at?: string
+}
+
+export interface ChallengeDetail extends ChallengeSummary {
+  sample_test_cases: TestCase[]
+  course_title?: string
+  course_slug?: string
+}
+
+export interface AdminChallengeDetail extends ChallengeSummary {
+  solution_code: string
+  test_cases: TestCase[]
+}
+
+export interface CreateTestCasePayload {
+  title: string
+  input: string
+  expected_output: string
+  hidden: boolean
+  sort_order: number
+}
+
+export interface CreateChallengePayload {
+  course_id?: string
+  lesson_id?: string
+  title: string
+  slug?: string
+  description: string
+  difficulty: DifficultyLevel
+  estimated_minutes: number
+  starter_code: string
+  solution_code: string
+  status: ContentStatus
+  sort_order: number
+  test_cases: CreateTestCasePayload[]
+}
+
+export interface UpdateChallengePayload {
+  course_id?: string
+  lesson_id?: string
+  title: string
+  slug?: string
+  description: string
+  difficulty: DifficultyLevel
+  estimated_minutes: number
+  starter_code: string
+  solution_code: string
+  sort_order: number
+  test_cases: CreateTestCasePayload[]
+}

@@ -16,6 +16,35 @@ type Bookmark struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type Challenge struct {
+	ID               pgtype.UUID        `json:"id"`
+	CourseID         pgtype.UUID        `json:"course_id"`
+	LessonID         pgtype.UUID        `json:"lesson_id"`
+	Title            string             `json:"title"`
+	Slug             string             `json:"slug"`
+	Description      string             `json:"description"`
+	Difficulty       string             `json:"difficulty"`
+	EstimatedMinutes int32              `json:"estimated_minutes"`
+	StarterCode      string             `json:"starter_code"`
+	SolutionCode     string             `json:"solution_code"`
+	Status           string             `json:"status"`
+	SortOrder        int32              `json:"sort_order"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	PublishedAt      pgtype.Timestamptz `json:"published_at"`
+}
+
+type ChallengeTestCase struct {
+	ID             pgtype.UUID        `json:"id"`
+	ChallengeID    pgtype.UUID        `json:"challenge_id"`
+	Title          string             `json:"title"`
+	Input          string             `json:"input"`
+	ExpectedOutput string             `json:"expected_output"`
+	Hidden         bool               `json:"hidden"`
+	SortOrder      int32              `json:"sort_order"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type Course struct {
 	ID             pgtype.UUID        `json:"id"`
 	LearningPathID pgtype.UUID        `json:"learning_path_id"`

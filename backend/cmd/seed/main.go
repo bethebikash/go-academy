@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
 
 	"github.com/google/uuid"
 
+	"go-academy/backend/internal/challenges"
 	"go-academy/backend/internal/config"
 	"go-academy/backend/internal/content"
 	"go-academy/backend/internal/database"
@@ -31,6 +33,7 @@ func main() {
 
 	db := database.NewDB(pool)
 	contentService := content.NewService(db)
+	challengeService := challenges.NewService(db)
 	userService := users.NewService(db)
 
 	// Fetch or use existing admin
@@ -47,8 +50,18 @@ func main() {
 		adminID = admin.ID
 	}
 
-	log.Printf("Using author ID %s to seed curriculum...", adminID)
+	log.Printf("Using author ID %s to seed curriculum & challenges...", adminID)
 
+	// Seed Curriculum if not already present
+	seedCurriculum(ctx, contentService, adminID)
+
+	// Seed Coding Challenges
+	seedChallenges(ctx, challengeService)
+
+	fmt.Println("All seeding completed successfully!")
+}
+
+func seedCurriculum(ctx context.Context, contentService *content.Service, adminID uuid.UUID) {
 	// 1. Learning Path: Go Fundamentals & Idiomatic Syntax
 	path1, err := contentService.CreateLearningPath(ctx, content.CreateLearningPathRequest{
 		Title:       "Go Fundamentals & Idiomatic Syntax",
@@ -57,12 +70,12 @@ func main() {
 		Status:      content.StatusPublished,
 		SortOrder:   1,
 	}, adminID)
-	if err != nil && err != content.ErrSlugExists {
+	if err != nil {
+		if errors.Is(err, content.ErrSlugExists) {
+			log.Println("Curriculum 'go-fundamentals' already seeded. Skipping curriculum.")
+			return
+		}
 		log.Fatalf("failed to create path 1: %v", err)
-	}
-	if err == content.ErrSlugExists {
-		log.Println("Curriculum already seeded. Skipping.")
-		return
 	}
 
 	log.Printf("Created path: %s", path1.Title)
@@ -100,34 +113,33 @@ func main() {
 		Summary:  "Explore Go's strong static type system and automatic zero-value initialization.",
 		Content: `# Variables, Types, and Zero Values
 
-In Go, variables are explicitly typed and strictly enforced at compile time. 
+In Go, every declared variable is allocated memory and initialized to its canonical **zero value** if no explicit initialization is provided.
 
-## Declaring Variables
-There are two common idioms for declaring variables in Go:
-
-### 1. Using ` + "`var`" + `
 ` + "```go" + `
 package main
 
 import "fmt"
 
 func main() {
-    var count int = 10
-    var name string = "Go Academy"
-    fmt.Printf("%s has %d lessons\n", name, count)
+    var count int       // 0
+    var active bool     // false
+    var message string  // ""
+    var pointer *int    // nil
+
+    fmt.Printf("count=%d, active=%t, message=%q, pointer=%v\n", count, active, message, pointer)
 }
 ` + "```" + `
 
-### 2. Short Variable Declaration (` + "`:=`" + `)
-Inside functions, the short declaration syntax ` + "`:=`" + ` infers types automatically:
+## Short Variable Declaration
+Inside function bodies, the ` + "`:=`" + ` operator offers concise type inference:
 
 ` + "```go" + `
-message := "Hello from Gopher"
-active := true
+language := "Go" // inferred as string
+score := 100     // inferred as int
 ` + "```" + `
 
 > [!NOTE]
-> Variables in Go are never uninitialized. When declared without an initial value, they always receive their **Zero Value** (` + "`0`" + ` for numbers, ` + "`\"\"`" + ` for strings, ` + "`false`" + ` for booleans, and ` + "`nil`" + ` for pointers/slices/maps).
+> Constants in Go are untyped by default until assigned to a variable or used in an expression that requires a typed value.
 `,
 		Difficulty:       content.DifficultyBeginner,
 		EstimatedMinutes: 10,
@@ -138,51 +150,37 @@ active := true
 		log.Fatalf("failed to create lesson 1: %v", err)
 	}
 
-	// Lesson 2: Control Flow (Prerequisite: Lesson 1)
-	lesson2, err := contentService.CreateLesson(ctx, content.CreateLessonRequest{
+	// Lesson 2: Pointers and Memory Semantics
+	_, err = contentService.CreateLesson(ctx, content.CreateLessonRequest{
 		ModuleID: mod1.ID,
-		Title:    "Control Flow: Branches and Loops",
-		Slug:     "control-flow-branches-loops",
-		Summary:  "Master if/else, switch statements, and Go's single unified loop keyword: for.",
-		Content: `# Control Flow: Branches and Loops
+		Title:    "Pointers and Memory Semantics",
+		Slug:     "pointers-memory-semantics",
+		Summary:  "Understand pass-by-value vs pointers, stack vs heap allocation, and escape analysis.",
+		Content: `# Pointers and Memory Semantics
 
-Go prioritizes simplicity and readability. Unlike languages with ` + "`while`" + ` or ` + "`do-while`" + `, Go has only one looping keyword: **` + "`for`" + `**.
-
-## If-Else with Pre-Statements
-Go supports declaring local scoped variables directly inside ` + "`if`" + ` conditions:
+Every assignment and function argument pass in Go is **strictly pass-by-value**. Pointers allow sharing memory across stack frames.
 
 ` + "```go" + `
-if err := runTask(); err != nil {
-    log.Fatalf("Task failed: %v", err)
+package main
+
+import "fmt"
+
+func increment(val *int) {
+    *val++
+}
+
+func main() {
+    x := 42
+    increment(&x)
+    fmt.Println(x) // prints 43
 }
 ` + "```" + `
 
-## Looping with ` + "`for`" + `
-Standard three-component loop:
-` + "```go" + `
-for i := 0; i < 5; i++ {
-    fmt.Println(i)
-}
-` + "```" + `
-
-While-style loop:
-` + "```go" + `
-n := 1
-for n < 100 {
-    n *= 2
-}
-` + "```" + `
-
-Infinite loop:
-` + "```go" + `
-for {
-    // runs until break or return
-    break
-}
-` + "```" + `
+## Escape Analysis
+The Go compiler performs **escape analysis** during compilation. If a variable's address is referenced outside its originating stack frame, the compiler moves the allocation to the **heap**. Otherwise, it stays on the high-performance **stack**.
 `,
 		Difficulty:       content.DifficultyBeginner,
-		EstimatedMinutes: 12,
+		EstimatedMinutes: 15,
 		Status:           content.StatusPublished,
 		SortOrder:        2,
 		PrerequisiteIDs:  []uuid.UUID{lesson1.ID},
@@ -191,52 +189,11 @@ for {
 		log.Fatalf("failed to create lesson 2: %v", err)
 	}
 
-	// Lesson 3: Functions, Defer, and Error Handling (Prerequisite: Lesson 2)
-	_, err = contentService.CreateLesson(ctx, content.CreateLessonRequest{
-		ModuleID: mod1.ID,
-		Title:    "Functions, Defer, and Multi-Value Returns",
-		Slug:     "functions-defer-multi-value-returns",
-		Summary:  "Understand first-class functions, deferred resource cleanup, and explicit error values.",
-		Content: `# Functions, Defer, and Multi-Value Returns
-
-Functions in Go are first-class citizens. They can return multiple values, commonly used for the ` + "`(result, error)`" + ` pattern.
-
-## Multi-Value Returns & Error Handling
-` + "```go" + `
-func divide(a, b float64) (float64, error) {
-    if b == 0 {
-        return 0, fmt.Errorf("division by zero")
-    }
-    return a / b, nil
-}
-` + "```" + `
-
-## The ` + "`defer`" + ` Statement
-A ` + "`defer`" + ` statement defers the execution of a function until the surrounding function returns. It is commonly used for resource cleanup (closing files, releasing locks):
-
-` + "```go" + `
-file, err := os.Open("data.txt")
-if err != nil {
-    return err
-}
-defer file.Close() // Guaranteed to run on exit
-` + "```" + `
-`,
-		Difficulty:       content.DifficultyBeginner,
-		EstimatedMinutes: 15,
-		Status:           content.StatusPublished,
-		SortOrder:        3,
-		PrerequisiteIDs:  []uuid.UUID{lesson2.ID},
-	})
-	if err != nil {
-		log.Fatalf("failed to create lesson 3: %v", err)
-	}
-
-	// 2. Learning Path: Concurrency & Systems Programming
+	// 2. Learning Path: Concurrency & Systems Architecture
 	path2, err := contentService.CreateLearningPath(ctx, content.CreateLearningPathRequest{
-		Title:       "High-Performance Concurrency in Go",
-		Slug:        "high-performance-concurrency",
-		Description: "Master CSP-style concurrency with Goroutines, buffered/unbuffered channels, select multiplexing, sync primitives, and context cancellation.",
+		Title:       "Concurrency & Systems Architecture",
+		Slug:        "concurrency-systems-architecture",
+		Description: "Master CSP (Communicating Sequential Processes) concurrency patterns, goroutines, channels, sync primitives, and race condition prevention.",
 		Status:      content.StatusPublished,
 		SortOrder:   2,
 	}, adminID)
@@ -246,7 +203,7 @@ defer file.Close() // Guaranteed to run on exit
 
 	course2, err := contentService.CreateCourse(ctx, content.CreateCourseRequest{
 		LearningPathID: path2.ID,
-		Title:          "Goroutines and Channel Multiplexing",
+		Title:          "Goroutines, Channels & Multiplexing",
 		Slug:           "goroutines-channels-multiplexing",
 		Description:    "Harness the power of Go's lightweight runtime scheduler and non-blocking channel communication.",
 		Status:         content.StatusPublished,
@@ -307,6 +264,338 @@ Unlike operating system threads (which usually have fixed 1-2MB stacks), Gorouti
 	if err != nil {
 		log.Fatalf("failed to create concurrency lesson: %v", err)
 	}
+}
 
-	fmt.Println("Curriculum seeding completed successfully!")
+func seedChallenges(ctx context.Context, challengeService *challenges.Service) {
+	challengeSeeds := []challenges.CreateChallengeRequest{
+		{
+			Title:            "Two Sum in Go",
+			Slug:             "two-sum-in-go",
+			Description:      "Given an array of integers `nums` and an integer `target`, return indices of the two numbers such that they add up to `target`.\n\nYou may assume that each input has exactly one solution, and you may not use the same element twice. Return the indices as `[]int{i, j}` with `i < j`.\n\n### Complexity Goal\n- Time Complexity: **O(n)** using a hash map\n- Space Complexity: **O(n)**",
+			Difficulty:       challenges.DifficultyBeginner,
+			EstimatedMinutes: 15,
+			StarterCode: `package main
+
+// TwoSum returns the indices of the two numbers in nums that add up to target.
+func TwoSum(nums []int, target int) []int {
+	// TODO: Implement your O(n) hash map solution here
+	return nil
+}
+`,
+			SolutionCode: `package main
+
+func TwoSum(nums []int, target int) []int {
+	seen := make(map[int]int, len(nums))
+	for i, num := range nums {
+		diff := target - num
+		if j, ok := seen[diff]; ok {
+			return []int{j, i}
+		}
+		seen[num] = i
+	}
+	return nil
+}
+`,
+			Status:    challenges.StatusPublished,
+			SortOrder: 1,
+			TestCases: []challenges.CreateTestCaseRequest{
+				{
+					Title:          "Sample 1: nums = [2, 7, 11, 15], target = 9",
+					Input:          "nums = [2, 7, 11, 15], target = 9",
+					ExpectedOutput: "[0, 1]",
+					Hidden:         false,
+					SortOrder:      1,
+				},
+				{
+					Title:          "Sample 2: nums = [3, 2, 4], target = 6",
+					Input:          "nums = [3, 2, 4], target = 6",
+					ExpectedOutput: "[1, 2]",
+					Hidden:         false,
+					SortOrder:      2,
+				},
+				{
+					Title:          "Hidden: Duplicate Elements [3, 3], target = 6",
+					Input:          "nums = [3, 3], target = 6",
+					ExpectedOutput: "[0, 1]",
+					Hidden:         true,
+					SortOrder:      3,
+				},
+				{
+					Title:          "Hidden: Negative Numbers [-1, -2, -3, -4, -5], target = -8",
+					Input:          "nums = [-1, -2, -3, -4, -5], target = -8",
+					ExpectedOutput: "[2, 4]",
+					Hidden:         true,
+					SortOrder:      4,
+				},
+			},
+		},
+		{
+			Title:            "Reverse a String with Runes",
+			Slug:             "reverse-string-runes",
+			Description:      "In Go, strings are immutable byte sequences encoded in UTF-8. A single character (like an accent or emoji) might span multiple bytes.\n\nImplement `ReverseString(s string) string` that correctly reverses a UTF-8 string by converting it to a rune slice.\n\n### Example\n- Input: `\"Go Academy 🚀\"`\n- Output: `\"🚀 ymedacA oG\"`",
+			Difficulty:       challenges.DifficultyBeginner,
+			EstimatedMinutes: 10,
+			StarterCode: `package main
+
+// ReverseString reverses a UTF-8 string rune-by-rune.
+func ReverseString(s string) string {
+	// TODO: convert string to []rune and reverse
+	return ""
+}
+`,
+			SolutionCode: `package main
+
+func ReverseString(s string) string {
+	runes := []rune(s)
+	for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
+		runes[i], runes[j] = runes[j], runes[i]
+	}
+	return string(runes)
+}
+`,
+			Status:    challenges.StatusPublished,
+			SortOrder: 2,
+			TestCases: []challenges.CreateTestCaseRequest{
+				{
+					Title:          "Sample 1: ASCII String \"hello\"",
+					Input:          "\"hello\"",
+					ExpectedOutput: "\"olleh\"",
+					Hidden:         false,
+					SortOrder:      1,
+				},
+				{
+					Title:          "Sample 2: Unicode Emoji \"Go Academy 🚀\"",
+					Input:          "\"Go Academy 🚀\"",
+					ExpectedOutput: "\"🚀 ymedacA oG\"",
+					Hidden:         false,
+					SortOrder:      2,
+				},
+				{
+					Title:          "Hidden: Multibyte Japanese characters \"日本語\"",
+					Input:          "\"日本語\"",
+					ExpectedOutput: "\"語本日\"",
+					Hidden:         true,
+					SortOrder:      3,
+				},
+				{
+					Title:          "Hidden: Empty String",
+					Input:          "\"\"",
+					ExpectedOutput: "\"\"",
+					Hidden:         true,
+					SortOrder:      4,
+				},
+			},
+		},
+		{
+			Title:            "Concurrent Worker Pool",
+			Slug:             "concurrent-worker-pool",
+			Description:      "Implement a concurrent worker pool that processes a slice of integer jobs across `numWorkers` goroutines.\n\nEach worker squares its input number (`v * v`). Results must be returned in the original ascending order of input indices.\n\nEnsure proper channel closing and waitgroup synchronization so no goroutines leak.",
+			Difficulty:       challenges.DifficultyIntermediate,
+			EstimatedMinutes: 25,
+			StarterCode: `package main
+
+// ProcessJobs coordinates numWorkers goroutines to square integers concurrently.
+func ProcessJobs(jobs []int, numWorkers int) []int {
+	// TODO: implement worker pool with channels and sync.WaitGroup
+	return nil
+}
+`,
+			SolutionCode: `package main
+
+import (
+	"sync"
+)
+
+type jobItem struct {
+	index int
+	val   int
+}
+
+type resultItem struct {
+	index int
+	val   int
+}
+
+func ProcessJobs(jobs []int, numWorkers int) []int {
+	if len(jobs) == 0 {
+		return []int{}
+	}
+	if numWorkers <= 0 {
+		numWorkers = 1
+	}
+
+	jobCh := make(chan jobItem, len(jobs))
+	resCh := make(chan resultItem, len(jobs))
+
+	var wg sync.WaitGroup
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobCh {
+				resCh <- resultItem{index: j.index, val: j.val * j.val}
+			}
+		}()
+	}
+
+	for i, v := range jobs {
+		jobCh <- jobItem{index: i, val: v}
+	}
+	close(jobCh)
+
+	wg.Wait()
+	close(resCh)
+
+	results := make([]int, len(jobs))
+	for res := range resCh {
+		results[res.index] = res.val
+	}
+	return results
+}
+`,
+			Status:    challenges.StatusPublished,
+			SortOrder: 3,
+			TestCases: []challenges.CreateTestCaseRequest{
+				{
+					Title:          "Sample 1: jobs = [1, 2, 3, 4, 5], workers = 3",
+					Input:          "jobs = [1, 2, 3, 4, 5], numWorkers = 3",
+					ExpectedOutput: "[1, 4, 9, 16, 25]",
+					Hidden:         false,
+					SortOrder:      1,
+				},
+				{
+					Title:          "Hidden: Empty Jobs Slice",
+					Input:          "jobs = [], numWorkers = 2",
+					ExpectedOutput: "[]",
+					Hidden:         true,
+					SortOrder:      2,
+				},
+				{
+					Title:          "Hidden: Large Batch with High Concurrency",
+					Input:          "jobs = [10, 20, 30, 40, 50], numWorkers = 5",
+					ExpectedOutput: "[100, 400, 900, 1600, 2500]",
+					Hidden:         true,
+					SortOrder:      3,
+				},
+			},
+		},
+		{
+			Title:            "Thread-Safe LRU Cache",
+			Slug:             "thread-safe-lru-cache",
+			Description:      "Design and implement a concurrent Least Recently Used (LRU) Cache supporting `Get(key int) (int, bool)` and `Put(key, value int)` in $O(1)$ time complexity.\n\nUse a doubly linked list and a hash map protected by a synchronization lock (`sync.RWMutex`).",
+			Difficulty:       challenges.DifficultyAdvanced,
+			EstimatedMinutes: 35,
+			StarterCode: `package main
+
+// LRUCache represents a thread-safe LRU cache.
+type LRUCache struct {
+	// TODO: Define fields
+}
+
+func Constructor(capacity int) LRUCache {
+	// TODO: Initialize cache
+	return LRUCache{}
+}
+
+func (c *LRUCache) Get(key int) (int, bool) {
+	// TODO: Implement O(1) Get
+	return 0, false
+}
+
+func (c *LRUCache) Put(key int, value int) {
+	// TODO: Implement O(1) Put with eviction
+}
+`,
+			SolutionCode: `package main
+
+import (
+	"container/list"
+	"sync"
+)
+
+type cacheEntry struct {
+	key   int
+	value int
+}
+
+type LRUCache struct {
+	mu       sync.RWMutex
+	capacity int
+	items    map[int]*list.Element
+	evict    *list.List
+}
+
+func Constructor(capacity int) LRUCache {
+	return LRUCache{
+		capacity: capacity,
+		items:    make(map[int]*list.Element, capacity),
+		evict:    list.New(),
+	}
+}
+
+func (c *LRUCache) Get(key int) (int, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if elem, ok := c.items[key]; ok {
+		c.evict.MoveToFront(elem)
+		return elem.Value.(*cacheEntry).value, true
+	}
+	return 0, false
+}
+
+func (c *LRUCache) Put(key int, value int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if elem, ok := c.items[key]; ok {
+		c.evict.MoveToFront(elem)
+		elem.Value.(*cacheEntry).value = value
+		return
+	}
+
+	if c.evict.Len() >= c.capacity {
+		oldest := c.evict.Back()
+		if oldest != nil {
+			c.evict.Remove(oldest)
+			delete(c.items, oldest.Value.(*cacheEntry).key)
+		}
+	}
+
+	elem := c.evict.PushFront(&cacheEntry{key: key, value: value})
+	c.items[key] = elem
+}
+`,
+			Status:    challenges.StatusPublished,
+			SortOrder: 4,
+			TestCases: []challenges.CreateTestCaseRequest{
+				{
+					Title:          "Sample 1: Basic Get and Put sequence",
+					Input:          "cap = 2, put(1, 1), put(2, 2), get(1)",
+					ExpectedOutput: "1, true",
+					Hidden:         false,
+					SortOrder:      1,
+				},
+				{
+					Title:          "Hidden: Eviction of Least Recently Used",
+					Input:          "cap = 2, put(1, 1), put(2, 2), get(1), put(3, 3), get(2)",
+					ExpectedOutput: "0, false",
+					Hidden:         true,
+					SortOrder:      2,
+				},
+			},
+		},
+	}
+
+	for _, ch := range challengeSeeds {
+		created, err := challengeService.CreateChallenge(ctx, ch)
+		if err != nil {
+			if errors.Is(err, challenges.ErrSlugExists) {
+				log.Printf("Challenge %q already exists. Skipping.", ch.Title)
+				continue
+			}
+			log.Fatalf("failed to seed challenge %q: %v", ch.Title, err)
+		}
+		log.Printf("Seeded challenge: %s (ID: %s, %d test cases)", created.Title, created.ID, len(created.TestCases))
+	}
 }
