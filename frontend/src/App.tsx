@@ -9,6 +9,8 @@ import LearningPaths from './routes/LearningPaths'
 import PathDetail from './routes/PathDetail'
 import CourseDetail from './routes/CourseDetail'
 import LessonReader from './routes/LessonReader'
+import Notes from './routes/Notes'
+import Bookmarks from './routes/Bookmarks'
 import AdminInvitations from './routes/admin/Invitations'
 import AdminUsers from './routes/admin/Users'
 import ContentManager from './routes/admin/ContentManager'
@@ -81,8 +83,8 @@ export default function App() {
             <Route path="courses/:slug" element={<CourseDetail />} />
             <Route path="lessons/:slug" element={<LessonReader />} />
             <Route path="challenges" element={<ComingSoon title="Coding Challenges" phase="Phase 4" />} />
-            <Route path="notes" element={<ComingSoon title="Personal Notes" phase="Phase 3" />} />
-            <Route path="bookmarks" element={<ComingSoon title="Bookmarks" phase="Phase 3" />} />
+            <Route path="notes" element={<Notes />} />
+            <Route path="bookmarks" element={<Bookmarks />} />
             <Route path="progress" element={<ComingSoon title="Detailed Progress" phase="Phase 6" />} />
 
             {/* Protected Admin Routes */}

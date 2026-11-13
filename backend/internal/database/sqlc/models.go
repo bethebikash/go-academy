@@ -8,6 +8,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Bookmark struct {
+	ID          pgtype.UUID        `json:"id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	LessonID    pgtype.UUID        `json:"lesson_id"`
+	ChallengeID pgtype.UUID        `json:"challenge_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type Course struct {
 	ID             pgtype.UUID        `json:"id"`
 	LearningPathID pgtype.UUID        `json:"learning_path_id"`
@@ -88,6 +96,24 @@ type Module struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type Note struct {
+	ID          pgtype.UUID        `json:"id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	LessonID    pgtype.UUID        `json:"lesson_id"`
+	ChallengeID pgtype.UUID        `json:"challenge_id"`
+	Title       string             `json:"title"`
+	Content     string             `json:"content"`
+	Pinned      bool               `json:"pinned"`
+	Version     int32              `json:"version"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type NoteTag struct {
+	NoteID pgtype.UUID `json:"note_id"`
+	TagID  pgtype.UUID `json:"tag_id"`
+}
+
 type RefreshSession struct {
 	ID            pgtype.UUID        `json:"id"`
 	UserID        pgtype.UUID        `json:"user_id"`
@@ -104,6 +130,13 @@ type Role struct {
 	Name        string             `json:"name"`
 	Description pgtype.Text        `json:"description"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type Tag struct {
+	ID        pgtype.UUID        `json:"id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	Name      string             `json:"name"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type User struct {

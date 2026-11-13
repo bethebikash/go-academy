@@ -13,11 +13,13 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"go-academy/backend/internal/auth"
+	"go-academy/backend/internal/bookmarks"
 	"go-academy/backend/internal/config"
 	"go-academy/backend/internal/content"
 	"go-academy/backend/internal/database"
 	"go-academy/backend/internal/invitations"
 	"go-academy/backend/internal/middleware"
+	"go-academy/backend/internal/notes"
 	"go-academy/backend/internal/progress"
 	"go-academy/backend/internal/users"
 )
@@ -44,12 +46,16 @@ func TestEndToEndPlatformFlow(t *testing.T) {
 	invitationService := invitations.NewService(db, cfg, userService)
 	contentService := content.NewService(db)
 	progressService := progress.NewService(db)
+	noteService := notes.NewService(db)
+	bookmarkService := bookmarks.NewService(db)
 
 	authHandler := auth.NewHandler(authService, userService, cfg)
 	invitationHandler := invitations.NewHandler(invitationService, cfg)
 	userHandler := users.NewHandler(userService)
 	contentHandler := content.NewHandler(contentService)
 	progressHandler := progress.NewHandler(progressService)
+	noteHandler := notes.NewHandler(noteService)
+	bookmarkHandler := bookmarks.NewHandler(bookmarkService)
 
 	// Build full API router
 	r := chi.NewRouter()
@@ -73,6 +79,20 @@ func TestEndToEndPlatformFlow(t *testing.T) {
 			r.Get("/lessons/{slug}", contentHandler.GetLesson)
 			r.Get("/lessons/{id}/progress", progressHandler.GetProgress)
 			r.Put("/lessons/{id}/progress", progressHandler.UpdateProgress)
+
+			r.Route("/notes", func(r chi.Router) {
+				r.Get("/", noteHandler.ListNotes)
+				r.Post("/", noteHandler.CreateNote)
+				r.Patch("/{id}", noteHandler.UpdateNote)
+				r.Delete("/{id}", noteHandler.DeleteNote)
+			})
+
+			r.Route("/bookmarks", func(r chi.Router) {
+				r.Get("/", bookmarkHandler.ListBookmarks)
+				r.Post("/", bookmarkHandler.CreateBookmark)
+				r.Get("/check", bookmarkHandler.CheckLesson)
+				r.Delete("/lessons/{lessonId}", bookmarkHandler.DeleteLessonBookmark)
+			})
 		})
 
 		r.Route("/admin", func(r chi.Router) {
@@ -240,6 +260,79 @@ func TestEndToEndPlatformFlow(t *testing.T) {
 	resp, err = client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 for marking lesson complete, got %d", resp.StatusCode)
+	}
+
+	// Step 6.4: Learner creates a personal note
+	notePayload, _ := json.Marshal(map[string]any{
+		"lesson_id": lessonResp.Data.ID,
+		"title":     "Variables Note",
+		"content":   "Zero values are applied automatically in Go.",
+		"tags":      []string{"basics", "variables"},
+	})
+	req, _ = http.NewRequest(http.MethodPost, server.URL+"/api/v1/notes", bytes.NewReader(notePayload))
+	req.Header.Set("Authorization", "Bearer "+learnerToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 for creating note, got %d", resp.StatusCode)
+	}
+	var createdNoteResp struct {
+		Data struct {
+			ID      string `json:"id"`
+			Version int    `json:"version"`
+		} `json:"data"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&createdNoteResp)
+
+	// Step 6.5: Learner updates note with valid version (Optimistic locking)
+	updateNotePayload, _ := json.Marshal(map[string]any{
+		"title":   "Variables Note - Updated",
+		"content": "Expanded content.",
+		"version": createdNoteResp.Data.Version,
+	})
+	req, _ = http.NewRequest(http.MethodPatch, server.URL+"/api/v1/notes/"+createdNoteResp.Data.ID, bytes.NewReader(updateNotePayload))
+	req.Header.Set("Authorization", "Bearer "+learnerToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for updating note with valid version, got %d", resp.StatusCode)
+	}
+
+	// Step 6.6: Learner bookmarks the lesson
+	bmPayload, _ := json.Marshal(map[string]string{
+		"lesson_id": lessonResp.Data.ID,
+	})
+	req, _ = http.NewRequest(http.MethodPost, server.URL+"/api/v1/bookmarks", bytes.NewReader(bmPayload))
+	req.Header.Set("Authorization", "Bearer "+learnerToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201 for bookmarking lesson, got %d", resp.StatusCode)
+	}
+
+	// Step 6.7: Check bookmark status
+	req, _ = http.NewRequest(http.MethodGet, server.URL+"/api/v1/bookmarks/check?lesson_id="+lessonResp.Data.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+learnerToken)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for checking bookmark, got %d", resp.StatusCode)
+	}
+	var checkBmResp struct {
+		Data struct {
+			Bookmarked bool `json:"bookmarked"`
+		} `json:"data"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&checkBmResp)
+	if !checkBmResp.Data.Bookmarked {
+		t.Fatal("expected lesson to be bookmarked")
+	}
+
+	// Step 6.8: Remove bookmark
+	req, _ = http.NewRequest(http.MethodDelete, server.URL+"/api/v1/bookmarks/lessons/"+lessonResp.Data.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+learnerToken)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for removing bookmark, got %d", resp.StatusCode)
 	}
 
 	// Step 7: Admin disables learner account

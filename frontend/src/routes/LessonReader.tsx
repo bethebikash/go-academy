@@ -3,15 +3,19 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
   ArrowRight,
+  Bookmark as BookmarkIcon,
   CheckCircle2,
   Clock,
+  FileText,
   Lock,
   Loader2,
+  Plus,
   ShieldAlert,
   Sparkles,
+  Trash2,
 } from 'lucide-react'
 import { apiRequest } from '../lib/api'
-import { LessonDetail } from '../types'
+import { LessonDetail, Note } from '../types'
 import MarkdownViewer from '../components/content/MarkdownViewer'
 
 export default function LessonReader() {
@@ -22,6 +26,17 @@ export default function LessonReader() {
   const [completing, setCompleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Bookmarking state
+  const [isBookmarked, setIsBookmarked] = useState(false)
+  const [bookmarking, setBookmarking] = useState(false)
+
+  // Lesson Notes state
+  const [notes, setNotes] = useState<Note[]>([])
+  const [notesOpen, setNotesOpen] = useState(false)
+  const [newNoteTitle, setNewNoteTitle] = useState('')
+  const [newNoteContent, setNewNoteContent] = useState('')
+  const [creatingNote, setCreatingNote] = useState(false)
+
   useEffect(() => {
     async function loadLesson() {
       try {
@@ -29,6 +44,22 @@ export default function LessonReader() {
         setError(null)
         const data = await apiRequest<LessonDetail>(`/lessons/${slug}`)
         setLesson(data)
+
+        // Check if lesson is bookmarked
+        try {
+          const bmRes = await apiRequest<{ bookmarked: boolean }>(`/bookmarks/check?lesson_id=${data.id}`)
+          setIsBookmarked(bmRes?.bookmarked || false)
+        } catch {
+          // Non-blocking
+        }
+
+        // Fetch notes for this lesson
+        try {
+          const notesData = await apiRequest<Note[]>(`/notes?lesson_id=${data.id}`)
+          setNotes(notesData || [])
+        } catch {
+          // Non-blocking
+        }
       } catch (err: any) {
         setError(err.message || 'Failed to load lesson')
       } finally {
@@ -39,6 +70,65 @@ export default function LessonReader() {
       loadLesson()
     }
   }, [slug])
+
+  const handleToggleBookmark = async () => {
+    if (!lesson || bookmarking) return
+
+    const previousState = isBookmarked
+    setIsBookmarked(!previousState) // Optimistic update
+    setBookmarking(true)
+
+    try {
+      if (previousState) {
+        await apiRequest(`/bookmarks/lessons/${lesson.id}`, { method: 'DELETE' })
+      } else {
+        await apiRequest('/bookmarks', {
+          method: 'POST',
+          body: JSON.stringify({ lesson_id: lesson.id }),
+        })
+      }
+    } catch (err) {
+      // Revert on error
+      setIsBookmarked(previousState)
+    } finally {
+      setBookmarking(false)
+    }
+  }
+
+  const handleCreateLessonNote = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!lesson || !newNoteTitle.trim()) return
+
+    try {
+      setCreatingNote(true)
+      const created = await apiRequest<Note>('/notes', {
+        method: 'POST',
+        body: JSON.stringify({
+          lesson_id: lesson.id,
+          title: newNoteTitle.trim(),
+          content: newNoteContent,
+          pinned: false,
+          tags: ['lesson-notes'],
+        }),
+      })
+      setNotes((prev) => [created, ...prev])
+      setNewNoteTitle('')
+      setNewNoteContent('')
+    } catch (err: any) {
+      setError(err.message || 'Failed to save note')
+    } finally {
+      setCreatingNote(false)
+    }
+  }
+
+  const handleDeleteLessonNote = async (noteId: string) => {
+    try {
+      await apiRequest(`/notes/${noteId}`, { method: 'DELETE' })
+      setNotes((prev) => prev.filter((n) => n.id !== noteId))
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete note')
+    }
+  }
 
   const handleMarkComplete = async () => {
     if (!lesson || lesson.is_completed) return
@@ -85,20 +175,121 @@ export default function LessonReader() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 pb-16">
-      {/* Navigation Breadcrumb */}
-      <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
-        <Link to="/learning-paths" className="hover:text-white transition">
-          Curriculum
-        </Link>
-        <span>/</span>
-        <Link to={`/courses/${lesson.course_slug}`} className="hover:text-white transition">
-          {lesson.course_title}
-        </Link>
-        <span>/</span>
-        <span className="text-neutral-500">{lesson.module_title}</span>
-        <span>/</span>
-        <span className="text-neutral-200 font-medium truncate max-w-xs">{lesson.title}</span>
+      {/* Navigation Breadcrumb & Quick Actions */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
+          <Link to="/learning-paths" className="hover:text-white transition">
+            Curriculum
+          </Link>
+          <span>/</span>
+          <Link to={`/courses/${lesson.course_slug}`} className="hover:text-white transition">
+            {lesson.course_title}
+          </Link>
+          <span>/</span>
+          <span className="text-neutral-500">{lesson.module_title}</span>
+          <span>/</span>
+          <span className="text-neutral-200 font-medium truncate max-w-xs">{lesson.title}</span>
+        </div>
+
+        {/* Action icons: Bookmark & Lesson Notes */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleToggleBookmark}
+            disabled={bookmarking}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition ${
+              isBookmarked
+                ? 'bg-indigo-600/20 border-indigo-500/40 text-indigo-300'
+                : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white'
+            }`}
+            title={isBookmarked ? 'Remove Bookmark' : 'Bookmark this lesson'}
+          >
+            <BookmarkIcon
+              className={`h-3.5 w-3.5 ${isBookmarked ? 'fill-indigo-400 text-indigo-400' : ''}`}
+            />
+            <span>{isBookmarked ? 'Bookmarked' : 'Bookmark'}</span>
+          </button>
+
+          <button
+            onClick={() => setNotesOpen(!notesOpen)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition ${
+              notesOpen
+                ? 'bg-neutral-800 border-neutral-700 text-white'
+                : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white'
+            }`}
+          >
+            <FileText className="h-3.5 w-3.5 text-indigo-400" />
+            <span>Notes {notes.length > 0 && `(${notes.length})`}</span>
+          </button>
+        </div>
       </div>
+
+      {/* Slide-down Lesson Notes Drawer */}
+      {notesOpen && (
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-6 space-y-5">
+          <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <FileText className="h-4 w-4 text-indigo-400" />
+              My Notes for this Lesson ({notes.length})
+            </h3>
+            <span className="text-xs text-neutral-500">Private annotations</span>
+          </div>
+
+          {/* New note form */}
+          <form onSubmit={handleCreateLessonNote} className="space-y-3">
+            <input
+              type="text"
+              required
+              value={newNoteTitle}
+              onChange={(e) => setNewNoteTitle(e.target.value)}
+              placeholder="Note title or observation..."
+              className="w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-1.5 text-xs text-white placeholder-neutral-500 focus:border-indigo-500 focus:outline-none"
+            />
+            <textarea
+              rows={3}
+              value={newNoteContent}
+              onChange={(e) => setNewNoteContent(e.target.value)}
+              placeholder="Jot down personal notes in Markdown..."
+              className="w-full rounded-lg border border-neutral-700 bg-neutral-950 p-3 font-mono text-xs text-white placeholder-neutral-500 leading-relaxed focus:border-indigo-500 focus:outline-none"
+            />
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={creatingNote}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 text-xs font-semibold text-white shadow transition"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>{creatingNote ? 'Adding...' : 'Add Note'}</span>
+              </button>
+            </div>
+          </form>
+
+          {/* Notes list */}
+          {notes.length > 0 && (
+            <div className="space-y-2 pt-2 border-t border-neutral-800">
+              {notes.map((n) => (
+                <div
+                  key={n.id}
+                  className="flex items-start justify-between gap-3 p-3 rounded-lg border border-neutral-800/80 bg-neutral-950/60 text-xs"
+                >
+                  <div className="space-y-1">
+                    <span className="font-semibold text-white block">{n.title}</span>
+                    <p className="text-neutral-300 font-sans leading-relaxed whitespace-pre-wrap">
+                      {n.content}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleDeleteLessonNote(n.id)}
+                    className="p-1 text-neutral-500 hover:text-rose-400 shrink-0"
+                    title="Delete note"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Lesson Header */}
       <div className="space-y-4 border-b border-neutral-800 pb-6">

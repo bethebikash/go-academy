@@ -165,3 +165,43 @@ export interface LessonProgress {
   last_accessed_at: string
   updated_at: string
 }
+
+
+// Notes & Bookmarks Types
+
+export interface Note {
+  id: string
+  user_id: string
+  lesson_id?: string
+  lesson_title?: string
+  lesson_slug?: string
+  title: string
+  content: string
+  pinned: boolean
+  version: number
+  tags: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface Tag {
+  id: string
+  name: string
+  note_count: number
+  created_at: string
+}
+
+export interface Bookmark {
+  id: string
+  user_id: string
+  lesson_id: string
+  lesson_title: string
+  lesson_slug: string
+  lesson_summary?: string
+  lesson_difficulty: DifficultyLevel
+  lesson_estimated_minutes: number
+  course_title: string
+  course_slug: string
+  progress_status: string
+  created_at: string
+}

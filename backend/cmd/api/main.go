@@ -17,12 +17,14 @@ import (
 	"golang.org/x/time/rate"
 
 	"go-academy/backend/internal/auth"
+	"go-academy/backend/internal/bookmarks"
 	"go-academy/backend/internal/config"
 	"go-academy/backend/internal/content"
 	"go-academy/backend/internal/database"
 	"go-academy/backend/internal/health"
 	"go-academy/backend/internal/invitations"
 	appmiddleware "go-academy/backend/internal/middleware"
+	"go-academy/backend/internal/notes"
 	"go-academy/backend/internal/platform/response"
 	"go-academy/backend/internal/progress"
 	"go-academy/backend/internal/users"
@@ -84,6 +86,8 @@ func main() {
 	invitationService := invitations.NewService(db, cfg, userService)
 	contentService := content.NewService(db)
 	progressService := progress.NewService(db)
+	noteService := notes.NewService(db)
+	bookmarkService := bookmarks.NewService(db)
 
 	// HTTP Handlers
 	healthHandler := health.NewHandler(db)
@@ -92,6 +96,8 @@ func main() {
 	userHandler := users.NewHandler(userService)
 	contentHandler := content.NewHandler(contentService)
 	progressHandler := progress.NewHandler(progressService)
+	noteHandler := notes.NewHandler(noteService)
+	bookmarkHandler := bookmarks.NewHandler(bookmarkService)
 
 	// Rate Limiters
 	loginLimiter := appmiddleware.NewIPRateLimiter(rate.Every(time.Minute/time.Duration(cfg.RateLimitLogin)), cfg.RateLimitLogin)
@@ -160,6 +166,26 @@ func main() {
 
 			r.Get("/lessons/{id}/progress", progressHandler.GetProgress)
 			r.Put("/lessons/{id}/progress", progressHandler.UpdateProgress)
+
+			// Personal Notes & Tags
+			r.Route("/notes", func(r chi.Router) {
+				r.Get("/", noteHandler.ListNotes)
+				r.Post("/", noteHandler.CreateNote)
+				r.Get("/{id}", noteHandler.GetNote)
+				r.Patch("/{id}", noteHandler.UpdateNote)
+				r.Put("/{id}", noteHandler.UpdateNote)
+				r.Delete("/{id}", noteHandler.DeleteNote)
+			})
+			r.Get("/tags", noteHandler.ListTags)
+
+			// Bookmarks
+			r.Route("/bookmarks", func(r chi.Router) {
+				r.Get("/", bookmarkHandler.ListBookmarks)
+				r.Post("/", bookmarkHandler.CreateBookmark)
+				r.Get("/check", bookmarkHandler.CheckLesson)
+				r.Delete("/{id}", bookmarkHandler.DeleteBookmark)
+				r.Delete("/lessons/{lessonId}", bookmarkHandler.DeleteLessonBookmark)
+			})
 		})
 
 		// Admin routes (Protected by authentication + admin role)

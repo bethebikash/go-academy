@@ -1,0 +1,6 @@
+-- 000003_add_notes_and_bookmarks.down.sql
+
+DROP TABLE IF EXISTS bookmarks CASCADE;
+DROP TABLE IF EXISTS note_tags CASCADE;
+DROP TABLE IF EXISTS tags CASCADE;
+DROP TABLE IF EXISTS notes CASCADE;
