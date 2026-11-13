@@ -274,3 +274,56 @@ func (s *Service) UpdateUserStatus(ctx context.Context, id uuid.UUID, newStatus 
 func (s *Service) CountAdmins(ctx context.Context) (int64, error) {
 	return s.db.Queries.CountAdmins(ctx)
 }
+
+// ListUsers retrieves users with pagination and total count.
+func (s *Service) ListUsers(ctx context.Context, page, limit int) ([]*User, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	offset := (page - 1) * limit
+
+	total, err := s.db.Queries.CountUsers(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count users: %w", err)
+	}
+
+	rows, err := s.db.Queries.ListUsers(ctx, sqlc.ListUsersParams{
+		Limit:  int32(limit),
+		Offset: int32(offset),
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list users: %w", err)
+	}
+
+	items := make([]*User, 0, len(rows))
+	for _, r := range rows {
+		var lastLogin *time.Time
+		if r.LastLoginAt.Valid {
+			t := r.LastLoginAt.Time
+			lastLogin = &t
+		}
+
+		roleName := r.Role
+		if roleName == "" {
+			roleName = RoleLearner
+		}
+
+		items = append(items, &User{
+			ID:          uuid.UUID(r.ID.Bytes),
+			Email:       r.Email,
+			Username:    r.Username,
+			Role:        roleName,
+			Status:      r.Status,
+			Timezone:    r.Timezone,
+			LastLoginAt: lastLogin,
+			CreatedAt:   r.CreatedAt.Time,
+			UpdatedAt:   r.UpdatedAt.Time,
+		})
+	}
+
+	return items, total, nil
+}
+

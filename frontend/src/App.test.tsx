@@ -2,14 +2,13 @@ import { render, screen } from '@testing-library/react'
 import { describe, it, expect } from 'vitest'
 import App from './App'
 
-describe('App Component', () => {
-  it('renders Go Academy title and navigation sections', () => {
+describe('App Routing and Auth Screens', () => {
+  it('renders login screen when unauthenticated', async () => {
     render(<App />)
-    expect(screen.getByText('Go Academy')).toBeInTheDocument()
-    expect(screen.getByText('Interactive Learning')).toBeInTheDocument()
-    expect(screen.getByText('Dashboard')).toBeInTheDocument()
-    expect(screen.getByText('Learning Paths')).toBeInTheDocument()
-    expect(screen.getAllByText('Challenges').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText('Platform Overview')).toBeInTheDocument()
+    expect(await screen.findByText('Sign in to Go Academy')).toBeInTheDocument()
+    expect(screen.getByText('Email Address')).toBeInTheDocument()
+    expect(screen.getByText('Password')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument()
+    expect(screen.getByText(/invite-only platform/i)).toBeInTheDocument()
   })
 })

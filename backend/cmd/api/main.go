@@ -85,6 +85,7 @@ func main() {
 	healthHandler := health.NewHandler(db)
 	authHandler := auth.NewHandler(authService, userService, cfg)
 	invitationHandler := invitations.NewHandler(invitationService, cfg)
+	userHandler := users.NewHandler(userService)
 
 	// Rate Limiters
 	loginLimiter := appmiddleware.NewIPRateLimiter(rate.Every(time.Minute/time.Duration(cfg.RateLimitLogin)), cfg.RateLimitLogin)
@@ -158,6 +159,12 @@ func main() {
 				r.Post("/", invitationHandler.Create)
 				r.Get("/", invitationHandler.List)
 				r.Delete("/{id}", invitationHandler.Revoke)
+			})
+
+			// Admin user management
+			r.Route("/users", func(r chi.Router) {
+				r.Get("/", userHandler.List)
+				r.Patch("/{id}/status", userHandler.UpdateStatus)
 			})
 		})
 	})
