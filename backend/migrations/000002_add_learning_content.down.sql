@@ -1,0 +1,8 @@
+-- 000002_add_learning_content.down.sql
+
+DROP TABLE IF EXISTS lesson_progress CASCADE;
+DROP TABLE IF EXISTS lesson_prerequisites CASCADE;
+DROP TABLE IF EXISTS lessons CASCADE;
+DROP TABLE IF EXISTS modules CASCADE;
+DROP TABLE IF EXISTS courses CASCADE;
+DROP TABLE IF EXISTS learning_paths CASCADE;

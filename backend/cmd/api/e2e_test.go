@@ -14,9 +14,11 @@ import (
 
 	"go-academy/backend/internal/auth"
 	"go-academy/backend/internal/config"
+	"go-academy/backend/internal/content"
 	"go-academy/backend/internal/database"
 	"go-academy/backend/internal/invitations"
 	"go-academy/backend/internal/middleware"
+	"go-academy/backend/internal/progress"
 	"go-academy/backend/internal/users"
 )
 
@@ -40,10 +42,14 @@ func TestEndToEndPlatformFlow(t *testing.T) {
 	userService := users.NewService(db)
 	authService := auth.NewService(db, cfg, userService)
 	invitationService := invitations.NewService(db, cfg, userService)
+	contentService := content.NewService(db)
+	progressService := progress.NewService(db)
 
 	authHandler := auth.NewHandler(authService, userService, cfg)
 	invitationHandler := invitations.NewHandler(invitationService, cfg)
 	userHandler := users.NewHandler(userService)
+	contentHandler := content.NewHandler(contentService)
+	progressHandler := progress.NewHandler(progressService)
 
 	// Build full API router
 	r := chi.NewRouter()
@@ -57,6 +63,16 @@ func TestEndToEndPlatformFlow(t *testing.T) {
 			r.Post("/refresh", authHandler.Refresh)
 			r.Post("/logout", authHandler.Logout)
 			r.With(middleware.RequireAuth).Get("/me", authHandler.Me)
+		})
+
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireAuth)
+			r.Get("/learning-paths", contentHandler.ListPaths)
+			r.Get("/learning-paths/{slug}", contentHandler.GetPath)
+			r.Get("/courses/{slug}", contentHandler.GetCourse)
+			r.Get("/lessons/{slug}", contentHandler.GetLesson)
+			r.Get("/lessons/{id}/progress", progressHandler.GetProgress)
+			r.Put("/lessons/{id}/progress", progressHandler.UpdateProgress)
 		})
 
 		r.Route("/admin", func(r chi.Router) {
@@ -189,6 +205,41 @@ func TestEndToEndPlatformFlow(t *testing.T) {
 	resp, err = client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("expected 403 Forbidden for learner accessing admin invitations, got %d", resp.StatusCode)
+	}
+
+	// Step 6.1: Learner browses published learning paths
+	req, _ = http.NewRequest(http.MethodGet, server.URL+"/api/v1/learning-paths", nil)
+	req.Header.Set("Authorization", "Bearer "+learnerToken)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for learner browsing learning paths, got %d", resp.StatusCode)
+	}
+
+	// Step 6.2: Learner accesses lesson detail
+	req, _ = http.NewRequest(http.MethodGet, server.URL+"/api/v1/lessons/variables-types-zero-values", nil)
+	req.Header.Set("Authorization", "Bearer "+learnerToken)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for learner reading lesson, got %d", resp.StatusCode)
+	}
+	var lessonResp struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&lessonResp)
+	if lessonResp.Data.ID == "" {
+		t.Fatal("expected non-empty lesson id")
+	}
+
+	// Step 6.3: Learner marks lesson as completed
+	compPayload, _ := json.Marshal(map[string]string{"status": "completed"})
+	req, _ = http.NewRequest(http.MethodPut, server.URL+"/api/v1/lessons/"+lessonResp.Data.ID+"/progress", bytes.NewReader(compPayload))
+	req.Header.Set("Authorization", "Bearer "+learnerToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for marking lesson complete, got %d", resp.StatusCode)
 	}
 
 	// Step 7: Admin disables learner account

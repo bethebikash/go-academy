@@ -10,6 +10,7 @@ import {
   Activity,
   Users,
   Mail,
+  Layers,
   LogOut,
   CheckCircle2,
 } from 'lucide-react'
@@ -87,6 +88,10 @@ export default function AppLayout() {
                   Administration
                 </span>
                 <div className="mt-2 space-y-1">
+                  <NavLink to="/admin/content" className={navClass}>
+                    <Layers className="h-4 w-4 text-amber-400" />
+                    Content Manager
+                  </NavLink>
                   <NavLink to="/admin/invitations" className={navClass}>
                     <Mail className="h-4 w-4 text-amber-400" />
                     Invitations

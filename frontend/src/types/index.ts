@@ -46,3 +46,122 @@ export interface ApiErrorResponse {
     details?: ApiErrorDetail[]
   }
 }
+
+// Curriculum Types
+
+export type ContentStatus = 'draft' | 'published' | 'archived'
+export type DifficultyLevel = 'beginner' | 'intermediate' | 'advanced'
+
+export interface LearningPath {
+  id: string
+  title: string
+  slug: string
+  description?: string
+  status: ContentStatus
+  sort_order: number
+  created_by?: string
+  created_at: string
+  updated_at: string
+  published_at?: string
+  total_lessons?: number
+  completed_lessons?: number
+  progress_percent?: number
+}
+
+export interface Course {
+  id: string
+  learning_path_id: string
+  title: string
+  slug: string
+  description?: string
+  status: ContentStatus
+  sort_order: number
+  created_at: string
+  updated_at: string
+  published_at?: string
+  total_lessons?: number
+  completed_lessons?: number
+  progress_percent?: number
+}
+
+export interface Module {
+  id: string
+  course_id: string
+  title: string
+  slug: string
+  description?: string
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface Lesson {
+  id: string
+  module_id: string
+  title: string
+  slug: string
+  summary?: string
+  content: string
+  difficulty: DifficultyLevel
+  estimated_minutes: number
+  status: ContentStatus
+  sort_order: number
+  created_at: string
+  updated_at: string
+  published_at?: string
+}
+
+export interface LessonSummary {
+  id: string
+  title: string
+  slug: string
+  summary?: string
+  difficulty: DifficultyLevel
+  estimated_minutes: number
+  status: string
+  sort_order: number
+  is_completed: boolean
+  is_locked: boolean
+}
+
+export interface ModuleWithLessons extends Module {
+  lessons: LessonSummary[]
+}
+
+export interface CourseDetail extends Course {
+  modules: ModuleWithLessons[]
+  total_lessons: number
+  completed_lessons: number
+  progress_percent: number
+}
+
+export interface PrerequisiteInfo {
+  id: string
+  title: string
+  slug: string
+}
+
+export interface LessonDetail extends Lesson {
+  course_title: string
+  course_slug: string
+  module_title: string
+  module_slug: string
+  progress_status: string
+  is_completed: boolean
+  is_locked: boolean
+  missing_prerequisites: PrerequisiteInfo[]
+  prerequisites: PrerequisiteInfo[]
+  prev_lesson_slug?: string
+  next_lesson_slug?: string
+}
+
+export interface LessonProgress {
+  id: string
+  user_id: string
+  lesson_id: string
+  status: 'started' | 'completed'
+  started_at: string
+  completed_at?: string
+  last_accessed_at: string
+  updated_at: string
+}

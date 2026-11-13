@@ -8,6 +8,19 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Course struct {
+	ID             pgtype.UUID        `json:"id"`
+	LearningPathID pgtype.UUID        `json:"learning_path_id"`
+	Title          string             `json:"title"`
+	Slug           string             `json:"slug"`
+	Description    pgtype.Text        `json:"description"`
+	Status         string             `json:"status"`
+	SortOrder      int32              `json:"sort_order"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	PublishedAt    pgtype.Timestamptz `json:"published_at"`
+}
+
 type Invitation struct {
 	ID         pgtype.UUID        `json:"id"`
 	Email      string             `json:"email"`
@@ -17,6 +30,62 @@ type Invitation struct {
 	AcceptedAt pgtype.Timestamptz `json:"accepted_at"`
 	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type LearningPath struct {
+	ID          pgtype.UUID        `json:"id"`
+	Title       string             `json:"title"`
+	Slug        string             `json:"slug"`
+	Description pgtype.Text        `json:"description"`
+	Status      string             `json:"status"`
+	SortOrder   int32              `json:"sort_order"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	PublishedAt pgtype.Timestamptz `json:"published_at"`
+}
+
+type Lesson struct {
+	ID               pgtype.UUID        `json:"id"`
+	ModuleID         pgtype.UUID        `json:"module_id"`
+	Title            string             `json:"title"`
+	Slug             string             `json:"slug"`
+	Summary          pgtype.Text        `json:"summary"`
+	Content          string             `json:"content"`
+	Difficulty       string             `json:"difficulty"`
+	EstimatedMinutes int32              `json:"estimated_minutes"`
+	Status           string             `json:"status"`
+	SortOrder        int32              `json:"sort_order"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	PublishedAt      pgtype.Timestamptz `json:"published_at"`
+}
+
+type LessonPrerequisite struct {
+	LessonID             pgtype.UUID `json:"lesson_id"`
+	PrerequisiteLessonID pgtype.UUID `json:"prerequisite_lesson_id"`
+}
+
+type LessonProgress struct {
+	ID             pgtype.UUID        `json:"id"`
+	UserID         pgtype.UUID        `json:"user_id"`
+	LessonID       pgtype.UUID        `json:"lesson_id"`
+	Status         string             `json:"status"`
+	StartedAt      pgtype.Timestamptz `json:"started_at"`
+	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
+	LastAccessedAt pgtype.Timestamptz `json:"last_accessed_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Module struct {
+	ID          pgtype.UUID        `json:"id"`
+	CourseID    pgtype.UUID        `json:"course_id"`
+	Title       string             `json:"title"`
+	Slug        string             `json:"slug"`
+	Description pgtype.Text        `json:"description"`
+	SortOrder   int32              `json:"sort_order"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type RefreshSession struct {

@@ -18,11 +18,13 @@ import (
 
 	"go-academy/backend/internal/auth"
 	"go-academy/backend/internal/config"
+	"go-academy/backend/internal/content"
 	"go-academy/backend/internal/database"
 	"go-academy/backend/internal/health"
 	"go-academy/backend/internal/invitations"
 	appmiddleware "go-academy/backend/internal/middleware"
 	"go-academy/backend/internal/platform/response"
+	"go-academy/backend/internal/progress"
 	"go-academy/backend/internal/users"
 )
 
@@ -80,12 +82,16 @@ func main() {
 	userService := users.NewService(db)
 	authService := auth.NewService(db, cfg, userService)
 	invitationService := invitations.NewService(db, cfg, userService)
+	contentService := content.NewService(db)
+	progressService := progress.NewService(db)
 
 	// HTTP Handlers
 	healthHandler := health.NewHandler(db)
 	authHandler := auth.NewHandler(authService, userService, cfg)
 	invitationHandler := invitations.NewHandler(invitationService, cfg)
 	userHandler := users.NewHandler(userService)
+	contentHandler := content.NewHandler(contentService)
+	progressHandler := progress.NewHandler(progressService)
 
 	// Rate Limiters
 	loginLimiter := appmiddleware.NewIPRateLimiter(rate.Every(time.Minute/time.Duration(cfg.RateLimitLogin)), cfg.RateLimitLogin)
@@ -143,6 +149,19 @@ func main() {
 			r.With(appmiddleware.RequireAuth).Get("/me", authHandler.Me)
 		})
 
+		// Learner Curriculum & Progress routes (Protected by authentication)
+		r.Group(func(r chi.Router) {
+			r.Use(appmiddleware.RequireAuth)
+
+			r.Get("/learning-paths", contentHandler.ListPaths)
+			r.Get("/learning-paths/{slug}", contentHandler.GetPath)
+			r.Get("/courses/{slug}", contentHandler.GetCourse)
+			r.Get("/lessons/{slug}", contentHandler.GetLesson)
+
+			r.Get("/lessons/{id}/progress", progressHandler.GetProgress)
+			r.Put("/lessons/{id}/progress", progressHandler.UpdateProgress)
+		})
+
 		// Admin routes (Protected by authentication + admin role)
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(appmiddleware.RequireAuth)
@@ -165,6 +184,42 @@ func main() {
 			r.Route("/users", func(r chi.Router) {
 				r.Get("/", userHandler.List)
 				r.Patch("/{id}/status", userHandler.UpdateStatus)
+			})
+
+			// Admin curriculum management
+			r.Route("/learning-paths", func(r chi.Router) {
+				r.Get("/", contentHandler.AdminListPaths)
+				r.Post("/", contentHandler.AdminCreatePath)
+				r.Get("/{id}", contentHandler.AdminGetPath)
+				r.Put("/{id}", contentHandler.AdminUpdatePath)
+				r.Patch("/{id}/status", contentHandler.AdminUpdatePathStatus)
+				r.Delete("/{id}", contentHandler.AdminDeletePath)
+				r.Get("/{pathId}/courses", contentHandler.AdminListCourses)
+			})
+
+			r.Route("/courses", func(r chi.Router) {
+				r.Post("/", contentHandler.AdminCreateCourse)
+				r.Get("/{id}", contentHandler.AdminGetCourse)
+				r.Put("/{id}", contentHandler.AdminUpdateCourse)
+				r.Patch("/{id}/status", contentHandler.AdminUpdateCourseStatus)
+				r.Delete("/{id}", contentHandler.AdminDeleteCourse)
+				r.Get("/{courseId}/modules", contentHandler.AdminListModules)
+			})
+
+			r.Route("/modules", func(r chi.Router) {
+				r.Post("/", contentHandler.AdminCreateModule)
+				r.Get("/{id}", contentHandler.AdminGetModule)
+				r.Put("/{id}", contentHandler.AdminUpdateModule)
+				r.Delete("/{id}", contentHandler.AdminDeleteModule)
+				r.Get("/{moduleId}/lessons", contentHandler.AdminListLessons)
+			})
+
+			r.Route("/lessons", func(r chi.Router) {
+				r.Post("/", contentHandler.AdminCreateLesson)
+				r.Get("/{id}", contentHandler.AdminGetLesson)
+				r.Put("/{id}", contentHandler.AdminUpdateLesson)
+				r.Patch("/{id}/status", contentHandler.AdminUpdateLessonStatus)
+				r.Delete("/{id}", contentHandler.AdminDeleteLesson)
 			})
 		})
 	})

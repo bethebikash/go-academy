@@ -5,8 +5,14 @@ import AppLayout from './components/layout/AppLayout'
 import Login from './routes/Login'
 import Register from './routes/Register'
 import Dashboard from './routes/Dashboard'
+import LearningPaths from './routes/LearningPaths'
+import PathDetail from './routes/PathDetail'
+import CourseDetail from './routes/CourseDetail'
+import LessonReader from './routes/LessonReader'
 import AdminInvitations from './routes/admin/Invitations'
 import AdminUsers from './routes/admin/Users'
+import ContentManager from './routes/admin/ContentManager'
+import LessonEditor from './routes/admin/LessonEditor'
 import { Construction, ArrowLeft } from 'lucide-react'
 
 function ComingSoon({ title, phase }: { title: string; phase: string }) {
@@ -70,13 +76,40 @@ export default function App() {
           >
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<Dashboard />} />
-            <Route path="learning-paths" element={<ComingSoon title="Learning Paths" phase="Phase 2" />} />
+            <Route path="learning-paths" element={<LearningPaths />} />
+            <Route path="learning-paths/:slug" element={<PathDetail />} />
+            <Route path="courses/:slug" element={<CourseDetail />} />
+            <Route path="lessons/:slug" element={<LessonReader />} />
             <Route path="challenges" element={<ComingSoon title="Coding Challenges" phase="Phase 4" />} />
             <Route path="notes" element={<ComingSoon title="Personal Notes" phase="Phase 3" />} />
             <Route path="bookmarks" element={<ComingSoon title="Bookmarks" phase="Phase 3" />} />
             <Route path="progress" element={<ComingSoon title="Detailed Progress" phase="Phase 6" />} />
 
             {/* Protected Admin Routes */}
+            <Route
+              path="admin/content"
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <ContentManager />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="admin/lessons/new"
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <LessonEditor />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="admin/lessons/:id/edit"
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <LessonEditor />
+                </ProtectedRoute>
+              }
+            />
             <Route
               path="admin/invitations"
               element={
