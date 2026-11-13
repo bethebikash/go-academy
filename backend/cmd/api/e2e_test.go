@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"go-academy/backend/internal/analytics"
 	"go-academy/backend/internal/auth"
 	"go-academy/backend/internal/bookmarks"
 	"go-academy/backend/internal/challenges"
@@ -52,6 +53,11 @@ func TestEndToEndPlatformFlow(t *testing.T) {
 	bookmarkService := bookmarks.NewService(db)
 	codeRunner := runner.NewProcessRunner(5 * time.Second)
 	challengeService := challenges.NewService(db, codeRunner)
+	analyticsService := analytics.NewService(db)
+
+	progressService.SetActivityRecorder(analyticsService)
+	challengeService.SetActivityRecorder(analyticsService)
+	noteService.SetActivityRecorder(analyticsService)
 
 	authHandler := auth.NewHandler(authService, userService, cfg)
 	invitationHandler := invitations.NewHandler(invitationService, cfg)
@@ -61,12 +67,15 @@ func TestEndToEndPlatformFlow(t *testing.T) {
 	noteHandler := notes.NewHandler(noteService)
 	bookmarkHandler := bookmarks.NewHandler(bookmarkService)
 	challengeHandler := challenges.NewHandler(challengeService)
+	analyticsHandler := analytics.NewHandler(analyticsService)
 
 	// Build full API router
 	r := chi.NewRouter()
 	r.Use(middleware.Authenticate(cfg.JWTSecret))
 
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Get("/certificates/verify/{code}", analyticsHandler.VerifyCertificate)
+
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/login", authHandler.Login)
 			r.Post("/register", invitationHandler.Register)
@@ -105,6 +114,13 @@ func TestEndToEndPlatformFlow(t *testing.T) {
 			r.Post("/challenges/{slug}/submit", challengeHandler.SubmitChallenge)
 			r.Get("/challenges/{slug}/submissions", challengeHandler.ListSubmissions)
 			r.Get("/challenges/{slug}/submissions/{id}", challengeHandler.GetSubmission)
+
+			// Analytics & Certificates
+			r.Get("/analytics/summary", analyticsHandler.GetSummary)
+			r.Get("/analytics/activity", analyticsHandler.GetActivity)
+			r.Get("/analytics/badges", analyticsHandler.GetBadges)
+			r.Post("/certificates/claim", analyticsHandler.ClaimCertificate)
+			r.Get("/certificates/me", analyticsHandler.ListCertificates)
 		})
 
 		r.Route("/admin", func(r chi.Router) {
@@ -474,6 +490,33 @@ func TestEndToEndPlatformFlow(t *testing.T) {
 	resp, err = client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 for listing challenge submissions, got %d", resp.StatusCode)
+	}
+
+	// Step 6.10: Learner checks analytics summary and badges
+	req, _ = http.NewRequest(http.MethodGet, server.URL+"/api/v1/analytics/summary", nil)
+	req.Header.Set("Authorization", "Bearer "+learnerToken)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for analytics summary, got %d", resp.StatusCode)
+	}
+	var summaryResp struct {
+		Data struct {
+			Streak struct {
+				CurrentStreak int `json:"current_streak"`
+			} `json:"streak"`
+			CompletedLessons int `json:"completed_lessons"`
+		} `json:"data"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&summaryResp)
+	if summaryResp.Data.Streak.CurrentStreak < 1 {
+		t.Fatalf("expected streak >= 1, got %d", summaryResp.Data.Streak.CurrentStreak)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, server.URL+"/api/v1/analytics/badges", nil)
+	req.Header.Set("Authorization", "Bearer "+learnerToken)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for user badges, got %d", resp.StatusCode)
 	}
 
 	// Step 7: Admin disables learner account

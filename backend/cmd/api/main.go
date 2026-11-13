@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/cors"
 	"golang.org/x/time/rate"
 
+	"go-academy/backend/internal/analytics"
 	"go-academy/backend/internal/auth"
 	"go-academy/backend/internal/bookmarks"
 	"go-academy/backend/internal/challenges"
@@ -92,6 +93,12 @@ func main() {
 	bookmarkService := bookmarks.NewService(db)
 	codeRunner := runner.New(cfg)
 	challengeService := challenges.NewService(db, codeRunner)
+	analyticsService := analytics.NewService(db)
+
+	// Connect activity tracking across domains
+	progressService.SetActivityRecorder(analyticsService)
+	challengeService.SetActivityRecorder(analyticsService)
+	noteService.SetActivityRecorder(analyticsService)
 
 	// HTTP Handlers
 	healthHandler := health.NewHandler(db)
@@ -103,6 +110,7 @@ func main() {
 	noteHandler := notes.NewHandler(noteService)
 	bookmarkHandler := bookmarks.NewHandler(bookmarkService)
 	challengeHandler := challenges.NewHandler(challengeService)
+	analyticsHandler := analytics.NewHandler(analyticsService)
 
 	// Rate Limiters
 	loginLimiter := appmiddleware.NewIPRateLimiter(rate.Every(time.Minute/time.Duration(cfg.RateLimitLogin)), cfg.RateLimitLogin)
@@ -149,6 +157,9 @@ func main() {
 				"message": "Go Academy API v1 operational",
 			}, nil)
 		})
+
+		// Public Certificate Verification
+		r.Get("/certificates/verify/{code}", analyticsHandler.VerifyCertificate)
 
 		// Authentication routes
 		r.Route("/auth", func(r chi.Router) {
@@ -199,6 +210,13 @@ func main() {
 			r.Post("/challenges/{slug}/submit", challengeHandler.SubmitChallenge)
 			r.Get("/challenges/{slug}/submissions", challengeHandler.ListSubmissions)
 			r.Get("/challenges/{slug}/submissions/{id}", challengeHandler.GetSubmission)
+
+			// Analytics, Gamification & Certificates
+			r.Get("/analytics/summary", analyticsHandler.GetSummary)
+			r.Get("/analytics/activity", analyticsHandler.GetActivity)
+			r.Get("/analytics/badges", analyticsHandler.GetBadges)
+			r.Post("/certificates/claim", analyticsHandler.ClaimCertificate)
+			r.Get("/certificates/me", analyticsHandler.ListCertificates)
 		})
 
 		// Admin routes (Protected by authentication + admin role)

@@ -31,12 +31,21 @@ type Progress struct {
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
+type ActivityRecorder interface {
+	RecordActivity(ctx context.Context, userID uuid.UUID, activityType string, metadata map[string]interface{}) error
+}
+
 type Service struct {
-	db *database.DB
+	db       *database.DB
+	recorder ActivityRecorder
 }
 
 func NewService(db *database.DB) *Service {
 	return &Service{db: db}
+}
+
+func (s *Service) SetActivityRecorder(r ActivityRecorder) {
+	s.recorder = r
 }
 
 func (s *Service) GetLessonProgress(ctx context.Context, userID, lessonID uuid.UUID) (*Progress, error) {
@@ -90,6 +99,13 @@ func (s *Service) UpdateLessonProgress(ctx context.Context, userID, lessonID uui
 	}
 
 	p := fromSQLCLessonProgress(row)
+
+	if status == "completed" && s.recorder != nil {
+		_ = s.recorder.RecordActivity(ctx, userID, "lesson_completed", map[string]interface{}{
+			"lesson_id": lessonID.String(),
+		})
+	}
+
 	return &p, nil
 }
 

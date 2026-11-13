@@ -20,12 +20,21 @@ var (
 	ErrInvalidInput    = errors.New("invalid input")
 )
 
+type ActivityRecorder interface {
+	RecordActivity(ctx context.Context, userID uuid.UUID, activityType string, metadata map[string]interface{}) error
+}
+
 type Service struct {
-	db *database.DB
+	db       *database.DB
+	recorder ActivityRecorder
 }
 
 func NewService(db *database.DB) *Service {
 	return &Service{db: db}
+}
+
+func (s *Service) SetActivityRecorder(r ActivityRecorder) {
+	s.recorder = r
 }
 
 // CreateNote creates a new personal note and associates any provided tags.
@@ -84,6 +93,13 @@ func (s *Service) CreateNote(ctx context.Context, userID uuid.UUID, req CreateNo
 	}
 
 	res := fromSQLCNote(created, tagNames)
+
+	if s.recorder != nil {
+		_ = s.recorder.RecordActivity(ctx, userID, "note_created", map[string]interface{}{
+			"note_id": res.ID.String(),
+		})
+	}
+
 	return &res, nil
 }
 

@@ -323,3 +323,46 @@ export interface SubmissionDetail extends SubmissionSummary {
   error_output?: string
   test_outcomes: TestCaseOutcome[]
 }
+
+// Analytics, Streak & Gamification Types
+
+export interface StreakInfo {
+  current_streak: number
+  longest_streak: number
+  last_activity_date?: string
+}
+
+export interface ActivityCount {
+  date: string
+  count: number
+}
+
+export interface UserSummaryStats {
+  streak: StreakInfo
+  completed_lessons: number
+  solved_challenges: number
+  total_notes: number
+  total_certificates: number
+  earned_badges_count: number
+  total_badges_count: number
+}
+
+export interface Badge {
+  key: string
+  name: string
+  description: string
+  category: string
+  icon: string
+  awarded: boolean
+  awarded_at?: string
+}
+
+export interface Certificate {
+  id: string
+  user_id: string
+  learning_path_id: string
+  certificate_code: string
+  recipient_name: string
+  learning_path_title: string
+  issued_at: string
+}

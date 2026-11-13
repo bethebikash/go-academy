@@ -25,13 +25,22 @@ var (
 	ErrUnauthorized = errors.New("unauthorized")
 )
 
+type ActivityRecorder interface {
+	RecordActivity(ctx context.Context, userID uuid.UUID, activityType string, metadata map[string]interface{}) error
+}
+
 type Service struct {
-	db     *database.DB
-	runner runner.Runner
+	db       *database.DB
+	runner   runner.Runner
+	recorder ActivityRecorder
 }
 
 func NewService(db *database.DB, r runner.Runner) *Service {
 	return &Service{db: db, runner: r}
+}
+
+func (s *Service) SetActivityRecorder(r ActivityRecorder) {
+	s.recorder = r
 }
 
 // GenerateSlug converts title to URL-friendly string.
@@ -599,6 +608,12 @@ func (s *Service) SubmitChallenge(ctx context.Context, userID uuid.UUID, slug st
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("failed to commit submission: %w", err)
+	}
+
+	if execRes.Status == runner.StatusPassed && s.recorder != nil {
+		_ = s.recorder.RecordActivity(ctx, userID, "challenge_passed", map[string]interface{}{
+			"challenge_slug": chRow.Slug,
+		})
 	}
 
 	var compileOut *string

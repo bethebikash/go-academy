@@ -13,36 +13,15 @@ import Challenges from './routes/Challenges'
 import ChallengeWorkspace from './routes/ChallengeWorkspace'
 import Notes from './routes/Notes'
 import Bookmarks from './routes/Bookmarks'
+import Progress from './routes/Progress'
+import VerifyCertificate from './routes/VerifyCertificate'
 import AdminInvitations from './routes/admin/Invitations'
 import AdminUsers from './routes/admin/Users'
 import ContentManager from './routes/admin/ContentManager'
 import LessonEditor from './routes/admin/LessonEditor'
 import AdminChallenges from './routes/admin/AdminChallenges'
 import ChallengeEditor from './routes/admin/ChallengeEditor'
-import { Construction, ArrowLeft } from 'lucide-react'
-
-function ComingSoon({ title, phase }: { title: string; phase: string }) {
-  return (
-    <div className="py-16 text-center space-y-4 max-w-md mx-auto">
-      <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-neutral-900 border border-neutral-800 text-neutral-400">
-        <Construction className="h-6 w-6" />
-      </div>
-      <div>
-        <h2 className="text-xl font-bold text-white">{title}</h2>
-        <p className="text-sm text-neutral-400 mt-1">This module is scheduled for {phase}.</p>
-      </div>
-      <div>
-        <Link
-          to="/dashboard"
-          className="inline-flex items-center gap-2 text-xs font-medium text-indigo-400 hover:text-indigo-300"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          Back to Dashboard
-        </Link>
-      </div>
-    </div>
-  )
-}
+import { ArrowLeft } from 'lucide-react'
 
 function NotFound() {
   return (
@@ -70,6 +49,7 @@ export default function App() {
           {/* Public Auth Routes */}
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/certificates/verify/:code" element={<VerifyCertificate />} />
 
           {/* Protected Application Shell */}
           <Route
@@ -90,7 +70,7 @@ export default function App() {
             <Route path="challenges/:slug" element={<ChallengeWorkspace />} />
             <Route path="notes" element={<Notes />} />
             <Route path="bookmarks" element={<Bookmarks />} />
-            <Route path="progress" element={<ComingSoon title="Detailed Progress" phase="Phase 6" />} />
+            <Route path="progress" element={<Progress />} />
 
             {/* Protected Admin Routes */}
             <Route

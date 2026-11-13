@@ -16,6 +16,16 @@ type Bookmark struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type Certificate struct {
+	ID                pgtype.UUID        `json:"id"`
+	UserID            pgtype.UUID        `json:"user_id"`
+	LearningPathID    pgtype.UUID        `json:"learning_path_id"`
+	CertificateCode   string             `json:"certificate_code"`
+	RecipientName     string             `json:"recipient_name"`
+	LearningPathTitle string             `json:"learning_path_title"`
+	IssuedAt          pgtype.Timestamptz `json:"issued_at"`
+}
+
 type Challenge struct {
 	ID               pgtype.UUID        `json:"id"`
 	CourseID         pgtype.UUID        `json:"course_id"`
@@ -209,8 +219,32 @@ type User struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type UserActivity struct {
+	ID           pgtype.UUID        `json:"id"`
+	UserID       pgtype.UUID        `json:"user_id"`
+	ActivityType string             `json:"activity_type"`
+	ActivityDate pgtype.Date        `json:"activity_date"`
+	Metadata     []byte             `json:"metadata"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type UserBadge struct {
+	ID        pgtype.UUID        `json:"id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	BadgeKey  string             `json:"badge_key"`
+	AwardedAt pgtype.Timestamptz `json:"awarded_at"`
+}
+
 type UserRole struct {
 	UserID    pgtype.UUID        `json:"user_id"`
 	RoleID    pgtype.UUID        `json:"role_id"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type UserStreak struct {
+	UserID           pgtype.UUID        `json:"user_id"`
+	CurrentStreak    int32              `json:"current_streak"`
+	LongestStreak    int32              `json:"longest_streak"`
+	LastActivityDate pgtype.Date        `json:"last_activity_date"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
