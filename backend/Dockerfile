@@ -25,6 +25,7 @@ RUN apk add --no-cache ca-certificates tzdata && \
 WORKDIR /app
 
 COPY --from=builder /app/bin/api /app/bin/api
+COPY --from=builder /app/migrations /app/migrations
 
 USER appuser
 
