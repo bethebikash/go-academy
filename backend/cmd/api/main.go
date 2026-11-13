@@ -20,6 +20,7 @@ import (
 	"go-academy/backend/internal/config"
 	"go-academy/backend/internal/database"
 	"go-academy/backend/internal/health"
+	"go-academy/backend/internal/invitations"
 	appmiddleware "go-academy/backend/internal/middleware"
 	"go-academy/backend/internal/platform/response"
 	"go-academy/backend/internal/users"
@@ -78,13 +79,16 @@ func main() {
 	// Domain Services
 	userService := users.NewService(db)
 	authService := auth.NewService(db, cfg, userService)
+	invitationService := invitations.NewService(db, cfg, userService)
 
 	// HTTP Handlers
 	healthHandler := health.NewHandler(db)
 	authHandler := auth.NewHandler(authService, userService, cfg)
+	invitationHandler := invitations.NewHandler(invitationService, cfg)
 
-	// Rate Limiter for Login (e.g. 5 requests / min with burst capacity)
+	// Rate Limiters
 	loginLimiter := appmiddleware.NewIPRateLimiter(rate.Every(time.Minute/time.Duration(cfg.RateLimitLogin)), cfg.RateLimitLogin)
+	registerLimiter := appmiddleware.NewIPRateLimiter(rate.Every(time.Minute/time.Duration(cfg.RateLimitRegister)), cfg.RateLimitRegister)
 
 	// Router setup
 	r := chi.NewRouter()
@@ -131,6 +135,8 @@ func main() {
 		// Authentication routes
 		r.Route("/auth", func(r chi.Router) {
 			r.With(loginLimiter.Limit).Post("/login", authHandler.Login)
+			r.With(registerLimiter.Limit).Post("/register", invitationHandler.Register)
+			r.Get("/invitations/validate", invitationHandler.Validate)
 			r.Post("/refresh", authHandler.Refresh)
 			r.Post("/logout", authHandler.Logout)
 			r.With(appmiddleware.RequireAuth).Get("/me", authHandler.Me)
@@ -145,6 +151,13 @@ func main() {
 				response.JSON(w, http.StatusOK, map[string]string{
 					"message": "Admin authorization verified",
 				}, nil)
+			})
+
+			// Admin invitation management
+			r.Route("/invitations", func(r chi.Router) {
+				r.Post("/", invitationHandler.Create)
+				r.Get("/", invitationHandler.List)
+				r.Delete("/{id}", invitationHandler.Revoke)
 			})
 		})
 	})
